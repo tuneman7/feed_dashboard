@@ -1,0 +1,48 @@
+# Core Framework
+streamlit>=1.28.0
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# Database
+sqlalchemy>=2.0.0
+alembic>=1.12.0
+psycopg2-binary>=2.9.7
+databases[postgresql]>=0.8.0
+
+# Data Visualization
+altair>=5.1.0
+plotly>=5.17.0
+pandas>=2.1.0
+numpy>=1.24.0
+
+# Data Validation & Settings
+pydantic>=2.4.0
+pydantic-settings>=2.0.0
+
+# Utilities
+python-dotenv>=1.0.0
+pendulum>=2.1.2
+structlog>=23.2.0
+rich>=13.6.0
+
+# Development & Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+black>=23.9.0
+isort>=5.12.0
+flake8>=6.1.0
+
+# Optional: If using SQLite for development
+# sqlite3 is included in Python standard library
+
+# Optional: For advanced data tables in Streamlit
+streamlit-aggrid>=0.3.4
+
+# Optional: For authentication
+# streamlit-authenticator>=0.2.3
+
+python-dotenv 
+plotly
+pgadmin4
+
