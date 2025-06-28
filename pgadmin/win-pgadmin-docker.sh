@@ -1,14 +1,21 @@
 #!/bin/bash
 
-if [[ "$(pwd -P)" == /System/* ]]; then
-  echo "This directory is under /System and cannot be mounted into Docker."
+# Convert Git Bash path to Windows format
+WIN_PWD="$(pwd -W 2>/dev/null)"  # -W gets the full Windows path like C:/Users/Name/project
+if [[ -z "$WIN_PWD" ]]; then
+  echo "This script must be run from Git Bash on Windows with a directory that maps to a Windows drive (e.g., /c/Users/...)."
+  return 0 2>/dev/null || exit 0
+fi
+
+# Check if we're in a system-reserved folder (e.g., C:/Windows/System32)
+if [[ "$WIN_PWD" =~ ^[A-Za-z]:/Windows/System32.* ]]; then
+  echo "This directory is under C:/Windows/System32 and cannot be mounted into Docker."
   echo "Please move your project to somewhere like ~/projects and rerun this script."
   return 0 2>/dev/null || exit 0
 fi
 
-
 CONTAINER_NAME="pgadmin4"
-PGADMIN_DIR="$(pwd -P)/.pgadmin"   # Resolves physical path
+PGADMIN_DIR="$WIN_PWD/.pgadmin"
 PGADMIN_PORT=5050
 EMAIL="admin@example.com"
 PASSWORD="admin"
@@ -22,10 +29,6 @@ fi
 echo "[2/7] Ensuring pgAdmin data directory exists at $PGADMIN_DIR"
 mkdir -p "$PGADMIN_DIR"
 
-# Or alternatively, make it world-writable (less secure but works)
-chmod -R 777 "$PGADMIN_DIR"
-
-
 echo "[3/7] Pulling pgAdmin image if not already present..."
 docker image inspect dpage/pgadmin4:latest > /dev/null 2>&1 || docker pull dpage/pgadmin4:latest
 
@@ -38,10 +41,8 @@ docker run -d \
   -v "$PGADMIN_DIR":/var/lib/pgadmin \
   dpage/pgadmin4 > /dev/null
 
-
 echo "[5/7] Waiting for pgAdmin to become available..."
-echo "http://localhost:$PGADMIN_PORT;"
-RETRIES=30
+RETRIES=15
 until curl --silent --output /dev/null --head http://localhost:$PGADMIN_PORT; do
   ((RETRIES--))
   if [ $RETRIES -le 0 ]; then

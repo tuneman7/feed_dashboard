@@ -1,0 +1,42 @@
+# Terraform files
+*.tfstate*
+.terraform/
+.terraform.lock.hcl
+terraform.tfvars
+
+# SSH keys
+id_rsa*
+*.pem
+
+# Scripts
+connect.sh
+deploy.sh
+destroy.sh
+
+# Version control
+.git/
+.gitignore
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.env
+venv/
+env/
+
+# Build artifacts
+dist/
+build/
+*.log
