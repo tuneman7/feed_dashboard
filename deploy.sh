@@ -161,7 +161,7 @@ ssh -i id_rsa \
     -o UserKnownHostsFile=/dev/null \
     -o ServerAliveInterval=60 \
     -t ubuntu@$PUBLIC_IP \
-    'cd ~/app/feed_management_system/ && echo "=== Welcome to your Ubuntu development box ===" && echo "Current directory: $(pwd)" && echo "Files:" && ls -la && echo && echo "Installed tools:" && echo "- Python: $(python --version 2>/dev/null || echo "not found")" && echo "- Docker: $(docker --version 2>/dev/null || echo "not found")" && echo "- Node.js: $(node --version 2>/dev/null || echo "not found")" && echo && exec bash'
+    'cd ~/app/feed_management_system/ && echo "=== Welcome to your Ubuntu development box ===" && echo "Current directory: $(pwd)" && echo "Files:" && ls -la && echo && echo "Installed tools:" && echo "- Python: $(python --version 2>/dev/null || echo "not found")" && echo "- Docker: $(docker --version 2>/dev/null || echo "not found")" && echo "- Node.js: $(node --version 2>/dev/null || echo "not found")" && echo && . sr.sh && exec bash'
 
 # Check if SSH failed
 if [ $? -ne 0 ]; then
