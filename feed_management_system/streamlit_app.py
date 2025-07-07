@@ -100,32 +100,6 @@ def execute_query(query, params=None, fetch=True):
         st.error(f"Query execution failed: {e}")
         return pd.DataFrame() if fetch else False
 
-
-# def clear_database():
-#     """Clear all user-defined objects by running sql/clear_database/*.sql in order"""
-#     clear_path = os.path.join("sql", "clear_database", "*.sql")
-#     clear_files = sorted(glob.glob(clear_path))
-
-#     if not clear_files:
-#         st.warning("No clear scripts found in sql/clear_database/")
-#         return
-
-#     for file_path in clear_files:
-#         try:
-#             with open(file_path, "r") as f:
-#                 sql_commands = f.read()
-
-#             st.info(f"🔹 Running: {os.path.basename(file_path)}")
-
-#             for command in sql_commands.split(';'):
-#                 if command.strip():
-#                     try:
-#                         execute_query(command + ';', fetch=False)
-#                     except Exception as inner_err:
-#                         st.error(f"❌ Error in {os.path.basename(file_path)}:\n```\n{inner_err}\n```")
-#         except Exception as e:
-#             st.error(f"❌ Failed to process {file_path}:\n```\n{e}\n```")
-
 def clear_database():
     """Clear all user-defined objects by running sql/clear_database/*.sql in order"""
     clear_path = os.path.join("sql", "clear_database", "*.sql")
@@ -140,9 +114,6 @@ def clear_database():
                     execute_query(sql_block, fetch=False)
         except Exception as e:
             st.error(f"Failed to process {file_path}: {e}")
-
-
-
 
 
 
@@ -163,6 +134,7 @@ def create_database_schema():
 
 def insert_sample_data():
     """Insert sample data by running all .sql files in sql/dcl/ directory in sorted order"""
+
     dcl_path = os.path.join("sql", "dcl", "*.sql")
     dcl_files = sorted(glob.glob(dcl_path))
 
@@ -175,6 +147,19 @@ def insert_sample_data():
                         execute_query(command + ';', fetch=False)
         except Exception as e:
             st.error(f"Failed to process {file_path}: {e}")
+
+    functions_path = os.path.join("sql", "functions", "*.sql")
+    functions_files = sorted(glob.glob(functions_path))
+
+    for file_path in functions_files:
+        try:
+            with open(file_path, "r") as f:
+                command = f.read()
+                execute_query(command, fetch=False)
+        except Exception as e:
+            st.error(f"Failed to process {file_path}: {e}")
+
+
 
 
 def admin_database_setup():

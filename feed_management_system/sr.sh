@@ -31,7 +31,7 @@ select_database() {
       ;;
     3)
                
-      DB_HOST="dst-dashboard-database-fast.ckqboenmhdca.us-east-1.rds.amazonaws.com"
+      DB_HOST="dst-dashboard-database-fast1.ckqboenmhdca.us-east-1.rds.amazonaws.com"
       DB_PORT="5432"
       DB_NAME="feed_management"
       DB_USER="postgres"
