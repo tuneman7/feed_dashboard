@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS feed.feed_run_details (
     parent_detail_id INTEGER,
     feed_run_id INTEGER NOT NULL,
     detail_desc TEXT NOT NULL,
-    detail_data JSONB,
+    detail_data TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (parent_detail_id) REFERENCES feed.feed_run_details(detail_id),
     FOREIGN KEY (feed_run_id) REFERENCES feed.feed_run(feed_run_id)
