@@ -477,7 +477,7 @@ def admin_feeds():
         SELECT f.feed_id, f.feed_name, f.feed_type_cd, 
                sc.code_description as feed_type_description,
                scc.code_description as feed_status_description,
-               f.feed_description, f.feed_tag, f.is_active, f.created_at,
+               f.feed_description, f.is_active, f.created_at,
                (SELECT COUNT(*) FROM feed.feed_run fr WHERE fr.feed_id = f.feed_id) as run_count
         FROM feed.feed f
         JOIN admin.system_codes sc ON f.feed_type_cd = sc.common_cd AND sc.code_type_cd = 'FEED_TYPE'
@@ -595,14 +595,6 @@ def admin_feeds():
                 value=feed_data.get('feed_description', '') if not feed_data.empty else ""
             )
 
-            # NEW: Feed tag input
-            feed_tag = st.text_input(
-                "Feed Tag", 
-                value=feed_data.get('feed_tag', '') if not feed_data.empty else "",
-                max_chars=255,
-                help="Optional tag for categorizing or labeling this feed"
-            )
-
             is_active = st.checkbox(
                 "Active", 
                 value=feed_data.get('is_active', True) if not feed_data.empty else True
@@ -618,17 +610,17 @@ def admin_feeds():
                     try:
                         if mode == "Add":
                             query = """
-                            INSERT INTO feed.feed (feed_name, feed_type_cd, feed_type_cd_type, feed_status_id, feed_description, feed_tag, is_active)
-                            VALUES (%s, %s, 'FEED_TYPE', %s, %s, %s, %s);
+                            INSERT INTO feed.feed (feed_name, feed_type_cd, feed_type_cd_type, feed_status_id, feed_description, is_active)
+                            VALUES (%s, %s, 'FEED_TYPE', %s, %s, %s);
                             """
-                            params = (feed_name, feed_type, feed_status, feed_desc, feed_tag if feed_tag.strip() else None, is_active)
+                            params = (feed_name, feed_type, feed_status, feed_desc, is_active)
                         else:
                             query = """
                             UPDATE feed.feed
-                            SET feed_name = %s, feed_type_cd = %s, feed_status_id = %s, feed_description = %s, feed_tag = %s, is_active = %s
+                            SET feed_name = %s, feed_type_cd = %s, feed_status_id = %s, feed_description = %s, is_active = %s
                             WHERE feed_id = %s;
                             """
-                            params = (feed_name, feed_type, feed_status, feed_desc, feed_tag if feed_tag.strip() else None, is_active, feed_id)
+                            params = (feed_name, feed_type, feed_status, feed_desc, is_active, feed_id)
                         
                         if execute_query(query, params, fetch=False):
                             st.success(f"Feed '{feed_name}' {mode.lower()}ed successfully!")
@@ -877,7 +869,6 @@ def admin_feeds():
 
         else:
             st.warning("No feeds available. Please create a feed first.")
-
 
 def dashboard():
     """Main dashboard with overview"""

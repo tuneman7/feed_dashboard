@@ -32,11 +32,12 @@ CREATE TABLE IF NOT EXISTS feed.feed (
     feed_status_id INTEGER REFERENCES admin.system_codes(code_id),
     feed_name VARCHAR(255) NOT NULL,
     feed_description TEXT,
+    feed_tag VARCHAR(255),
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (feed_type_cd, feed_type_cd_type)
-        REFERENCES admin.system_codes(common_cd, code_type_cd)
+    REFERENCES admin.system_codes(common_cd, code_type_cd)
 );
 
 -- Drop old table if needed (optional safety)
