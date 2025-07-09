@@ -480,7 +480,7 @@ def admin_pipelines():
                f.pipeline_description, f.is_active, f.created_at,
                (SELECT COUNT(*) FROM pipeline.pipeline_run fr WHERE fr.pipeline_id = f.pipeline_id) as run_count
         FROM pipeline.pipeline f
-        JOIN admin.system_codes sc ON f.pipeline_type_cd = sc.common_cd AND sc.code_type_cd = 'FEED_TYPE'
+        JOIN admin.system_codes sc ON f.pipeline_type_cd = sc.common_cd AND sc.code_type_cd = 'PIPELINE_TYPE'
         LEFT JOIN admin.system_codes scc ON f.pipeline_status_id = scc.code_id
         ORDER BY f.pipeline_name;
         """
@@ -518,14 +518,14 @@ def admin_pipelines():
         pipeline_types_df = execute_query("""
             SELECT common_cd, code_description 
             FROM admin.system_codes 
-            WHERE code_type_cd = 'FEED_TYPE' AND is_active = true
+            WHERE code_type_cd = 'PIPELINE_TYPE' AND is_active = true
             ORDER BY sort_order, common_cd;
         """)
         
         pipeline_status_df = execute_query("""
             SELECT code_id, code_description
             FROM admin.system_codes
-            WHERE code_type_cd = 'FEED_STATUS' AND is_active = true
+            WHERE code_type_cd = 'PIPELINE_STATUS' AND is_active = true
             ORDER BY sort_order, code_description;
         """)
 
@@ -611,7 +611,7 @@ def admin_pipelines():
                         if mode == "Add":
                             query = """
                             INSERT INTO pipeline.pipeline (pipeline_name, pipeline_type_cd, pipeline_type_cd_type, pipeline_status_id, pipeline_description, is_active)
-                            VALUES (%s, %s, 'FEED_TYPE', %s, %s, %s);
+                            VALUES (%s, %s, 'PIPELINE_TYPE', %s, %s, %s);
                             """
                             params = (pipeline_name, pipeline_type, pipeline_status, pipeline_desc, is_active)
                         else:
@@ -643,7 +643,7 @@ def admin_pipelines():
                 confirm_delete = st.checkbox("I understand this will delete all related data")
                 
                 if confirm_delete:
-                    if st.button("🗑️ DELETE FEED", type="secondary"):
+                    if st.button("🗑️ DELETE PIPELINE", type="secondary"):
                         try:
                             # Delete in correct order to handle foreign key constraints
                             delete_queries = [
@@ -705,7 +705,7 @@ def admin_pipelines():
             # Add environment
             env_codes_df = execute_query("""
                 SELECT code_id, code_description FROM admin.system_codes
-                WHERE code_type_cd = 'FEED_ENVIRONMENT' AND is_active = true
+                WHERE code_type_cd = 'PIPELINE_ENVIRONMENT' AND is_active = true
                 ORDER BY sort_order;
             """)
 
@@ -772,7 +772,7 @@ def admin_pipelines():
                             
                             detail_codes_df = execute_query("""
                                 SELECT common_cd, code_description FROM admin.system_codes
-                                WHERE code_type_cd = 'FEED_RUN_DETAIL_TYPE' AND is_active = true
+                                WHERE code_type_cd = 'PIPELINE_RUN_DETAIL_TYPE' AND is_active = true
                                 ORDER BY sort_order;
                             """)
                             
@@ -830,7 +830,7 @@ def admin_pipelines():
             st.markdown("#### Add New Detail")
             detail_codes_df = execute_query("""
                 SELECT common_cd, code_description FROM admin.system_codes
-                WHERE code_type_cd = 'FEED_RUN_DETAIL_TYPE' AND is_active = true
+                WHERE code_type_cd = 'PIPELINE_RUN_DETAIL_TYPE' AND is_active = true
                 ORDER BY sort_order;
             """)
 
@@ -857,7 +857,7 @@ def admin_pipelines():
                                 insert_detail_query = """
                                 INSERT INTO pipeline.pipeline_details (
                                     pipeline_id, environment_id, detail_type_cd, detail_type_cd_type, detail_desc, detail_data
-                                ) VALUES (%s, %s, %s, 'FEED_RUN_DETAIL_TYPE', %s, %s);
+                                ) VALUES (%s, %s, %s, 'PIPELINE_RUN_DETAIL_TYPE', %s, %s);
                                 """
                                 if execute_query(insert_detail_query, (selected_pipeline_id, environment_id, detail_type, detail_desc, detail_data), fetch=False):
                                     st.success("Detail added successfully")

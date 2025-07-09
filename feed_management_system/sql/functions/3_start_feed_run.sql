@@ -20,7 +20,7 @@ BEGIN
     SELECT code_id INTO v_env_system_cd
     FROM admin.system_codes 
     WHERE UPPER(common_cd) = UPPER(p_environment) 
-    AND code_type_cd = 'FEED_ENVIRONMENT';
+    AND code_type_cd = 'PIPELINE_ENVIRONMENT';
     
     IF v_env_system_cd IS NULL THEN
         RAISE EXCEPTION 'Environment system code not found for: %', p_environment;
@@ -30,7 +30,7 @@ BEGIN
     SELECT code_id INTO v_pipeline_status_id
     FROM admin.system_codes 
     WHERE common_cd = 'ACTIVE' 
-    AND code_type_cd = 'FEED_STATUS';
+    AND code_type_cd = 'PIPELINE_STATUS';
     
     -- Get default status for pipeline runs (RUNNING)
     SELECT code_id INTO v_status_cd_id
@@ -54,8 +54,8 @@ BEGIN
             pipeline_tag,
             is_active
         ) VALUES (
-            'SFTP_FEED',
-            'FEED_TYPE',
+            'SFTP_PIPELINE',
+            'PIPELINE_TYPE',
             v_pipeline_status_id,
             'Auto Created for: ' || p_pipeline_tag,
             'Auto Created for: ' || p_pipeline_tag,

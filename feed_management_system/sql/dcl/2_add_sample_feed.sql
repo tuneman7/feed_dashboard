@@ -9,8 +9,8 @@ INSERT INTO pipeline.pipeline (
     is_active
 ) VALUES (
     'BATCH_PROC',
-    'FEED_TYPE',
-    (SELECT code_id FROM admin.system_codes WHERE common_cd = 'ACTIVE' AND code_type_cd = 'FEED_STATUS'),
+    'PIPELINE_TYPE',
+    (SELECT code_id FROM admin.system_codes WHERE common_cd = 'ACTIVE' AND code_type_cd = 'PIPELINE_STATUS'),
     'global batch 57',
     'Global batch processing pipeline #57',
     'global_batch57',
@@ -23,5 +23,5 @@ INSERT INTO pipeline.pipeline_environment (
     env_system_cd
 ) VALUES (
     (SELECT pipeline_id FROM pipeline.pipeline WHERE pipeline_name = 'global batch 57' AND pipeline_tag = 'global_batch57'),
-    (SELECT code_id FROM admin.system_codes WHERE common_cd = 'DEV' AND code_type_cd = 'FEED_ENVIRONMENT')
+    (SELECT code_id FROM admin.system_codes WHERE common_cd = 'DEV' AND code_type_cd = 'PIPELINE_ENVIRONMENT')
 );

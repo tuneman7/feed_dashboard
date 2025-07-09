@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS admin.system_codes (
 CREATE TABLE IF NOT EXISTS pipeline.pipeline (
     pipeline_id SERIAL PRIMARY KEY,
     pipeline_type_cd VARCHAR(50) NOT NULL,
-    pipeline_type_cd_type VARCHAR(50) NOT NULL DEFAULT 'FEED_TYPE',
+    pipeline_type_cd_type VARCHAR(50) NOT NULL DEFAULT 'PIPELINE_TYPE',
     pipeline_status_id INTEGER REFERENCES admin.system_codes(code_id),
     pipeline_name VARCHAR(255) NOT NULL,
     pipeline_description TEXT,
