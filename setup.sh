@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# Feed Management System Setup Script
+# Pipeline Management System Setup Script
 # This script creates the project structure, virtual environment, and installs dependencies
 
 # Script continues on errors - no automatic exit
 
 # Configuration
-PROJECT_NAME="feed_management_system"
+PROJECT_NAME="pipeline_management_system"
 PYTHON_VERSION="python3"
 VENV_NAME="venv"
 
@@ -143,11 +143,11 @@ print_success "requirements.txt created"
 print_status "Creating environment configuration..."
 cat > .env.example << 'EOF'
 # Database Configuration
-DATABASE_URL=postgresql://username:password@localhost:5432/feed_management
-# For SQLite development: DATABASE_URL=sqlite:///./feed_management.db
+DATABASE_URL=postgresql://username:password@localhost:5432/pipeline_management
+# For SQLite development: DATABASE_URL=sqlite:///./pipeline_management.db
 
 # Application Settings
-APP_NAME=Feed Management System
+APP_NAME=Pipeline Management System
 APP_VERSION=1.0.0
 DEBUG=True
 LOG_LEVEL=INFO
@@ -260,32 +260,32 @@ sys.path.append(str(project_root))
 
 # Configure Streamlit page
 st.set_page_config(
-    page_title="Feed Management System",
+    page_title="Pipeline Management System",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 def main():
-    st.title("📊 Feed Management System")
+    st.title("📊 Pipeline Management System")
     st.markdown("---")
     
     # Sidebar navigation
     st.sidebar.title("Navigation")
     page = st.sidebar.selectbox(
         "Choose a page",
-        ["Dashboard", "Feeds", "Feed Runs", "System Codes", "Admin"]
+        ["Dashboard", "Pipelines", "Pipeline Runs", "System Codes", "Admin"]
     )
     
     # Main content area
     if page == "Dashboard":
         st.header("Dashboard")
-        st.info("Welcome to the Feed Management System!")
+        st.info("Welcome to the Pipeline Management System!")
         
         # Sample metrics
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Total Feeds", "12", "2")
+            st.metric("Total Pipelines", "12", "2")
         with col2:
             st.metric("Active Runs", "3", "-1")
         with col3:
@@ -293,13 +293,13 @@ def main():
         with col4:
             st.metric("Avg Runtime", "2.3m", "-0.1m")
     
-    elif page == "Feeds":
-        st.header("Feed Configuration")
-        st.info("Feed management interface coming soon...")
+    elif page == "Pipelines":
+        st.header("Pipeline Configuration")
+        st.info("Pipeline management interface coming soon...")
     
-    elif page == "Feed Runs":
-        st.header("Feed Run History")
-        st.info("Feed run monitoring interface coming soon...")
+    elif page == "Pipeline Runs":
+        st.header("Pipeline Run History")
+        st.info("Pipeline run monitoring interface coming soon...")
     
     elif page == "System Codes":
         st.header("System Codes Management")
@@ -322,8 +322,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(
-    title="Feed Management System API",
-    description="API for managing data feeds and processing runs",
+    title="Pipeline Management System API",
+    description="API for managing data pipelines and processing runs",
     version="1.0.0"
 )
 
@@ -338,7 +338,7 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
-    return {"message": "Feed Management System API", "status": "running"}
+    return {"message": "Pipeline Management System API", "status": "running"}
 
 @app.get("/health")
 async def health_check():
@@ -372,9 +372,9 @@ chmod +x run_api.sh
 
 # Create README
 cat > README.md << 'EOF'
-# Feed Management System
+# Pipeline Management System
 
-A Python-based application for managing data feeds and processing runs.
+A Python-based application for managing data pipelines and processing runs.
 
 ## Architecture
 
@@ -411,7 +411,7 @@ Edit `.env` file with your database connection details.
 ## Project Structure
 
 ```
-feed_management_system/
+pipeline_management_system/
 ├── app/                    # Main application code
 │   ├── config/            # Configuration files
 │   ├── models/            # SQLAlchemy models
@@ -439,9 +439,9 @@ feed_management_system/
 The application uses the following main tables:
 - `code_type`: Code type definitions
 - `system_codes`: System enumeration values
-- `feed`: Feed configurations
-- `feed_run`: Feed execution runs
-- `feed_run_details`: Detailed run information
+- `pipeline`: Pipeline configurations
+- `pipeline_run`: Pipeline execution runs
+- `pipeline_run_details`: Detailed run information
 
 See the database schema documentation for complete details.
 EOF

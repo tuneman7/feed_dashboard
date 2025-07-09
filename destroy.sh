@@ -1,7 +1,11 @@
 #!/bin/bash
 
+set +e
+
 # Terraform Destroy Script
 # This script safely destroys the Terraform infrastructure
+
+. cleanup-rds-security.sh 
 
 echo "========================================="
 echo "Terraform Infrastructure Destroy Script"

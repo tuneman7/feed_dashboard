@@ -11,32 +11,32 @@ sys.path.append(str(project_root))
 
 # Configure Streamlit page
 st.set_page_config(
-    page_title="Feed Management System",
+    page_title="Pipeline Management System",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 def main():
-    st.title("📊 Feed Management System")
+    st.title("📊 Pipeline Management System")
     st.markdown("---")
     
     # Sidebar navigation
     st.sidebar.title("Navigation")
     page = st.sidebar.selectbox(
         "Choose a page",
-        ["Dashboard", "Feeds", "Feed Runs", "System Codes", "Admin"]
+        ["Dashboard", "Pipelines", "Pipeline Runs", "System Codes", "Admin"]
     )
     
     # Main content area
     if page == "Dashboard":
         st.header("Dashboard")
-        st.info("Welcome to the Feed Management System!")
+        st.info("Welcome to the Pipeline Management System!")
         
         # Sample metrics
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Total Feeds", "12", "2")
+            st.metric("Total Pipelines", "12", "2")
         with col2:
             st.metric("Active Runs", "3", "-1")
         with col3:
@@ -44,13 +44,13 @@ def main():
         with col4:
             st.metric("Avg Runtime", "2.3m", "-0.1m")
     
-    elif page == "Feeds":
-        st.header("Feed Configuration")
-        st.info("Feed management interface coming soon...")
+    elif page == "Pipelines":
+        st.header("Pipeline Configuration")
+        st.info("Pipeline management interface coming soon...")
     
-    elif page == "Feed Runs":
-        st.header("Feed Run History")
-        st.info("Feed run monitoring interface coming soon...")
+    elif page == "Pipeline Runs":
+        st.header("Pipeline Run History")
+        st.info("Pipeline run monitoring interface coming soon...")
     
     elif page == "System Codes":
         st.header("System Codes Management")

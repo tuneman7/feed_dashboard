@@ -1,5 +1,5 @@
-# Create the feed_management database
-createdb feed_management
+# Create the pipeline_management database
+createdb pipeline_management
 
 # Verify it was created
-psql -l | grep feed_management
+psql -l | grep pipeline_management

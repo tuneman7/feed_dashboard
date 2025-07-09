@@ -18,22 +18,22 @@ select_database() {
     1)
       DB_HOST="localhost"
       DB_PORT="5432"
-      DB_NAME="feed_management"
+      DB_NAME="pipeline_management"
       DB_USER="$USER"
       DB_PASSWORD=""
       ;;
     2)
       DB_HOST="dst-pipeline-dashboard.ckqboenmhdca.us-east-1.rds.amazonaws.com"
       DB_PORT="5432"
-      DB_NAME="feed_management"
+      DB_NAME="pipeline_management"
       DB_USER="postgres"
       DB_PASSWORD="Dashboard2025!$"
       ;;
     3)
                
-      DB_HOST="dst-dashboard-database-fast1.ckqboenmhdca.us-east-1.rds.amazonaws.com"
+      DB_HOST="dst-dashboard-database-fast.ckqboenmhdca.us-east-1.rds.amazonaws.com"
       DB_PORT="5432"
-      DB_NAME="feed_management"
+      DB_NAME="pipeline_management"
       DB_USER="postgres"
       DB_PASSWORD="Dashboard2025!$"
       ;;

@@ -125,9 +125,37 @@ fi
 # Clear the app directory and copy new files
 ssh -i id_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$PUBLIC_IP 'rm -rf ~/app && mkdir -p ~/app'
 
-# Copy files using scp
-if scp -i id_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -r "$TEMP_DIR"/* ubuntu@$PUBLIC_IP:~/app/ >/dev/null 2>&1; then
-    echo "✅ Files deployed successfully!"
+# Copy files using scp (show progress)
+echo "📤 Copying files..."
+if scp -i id_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -r "$TEMP_DIR"/* ubuntu@$PUBLIC_IP:~/app/; then
+    echo "✅ SCP completed!"
+    
+    # Verify the copy is complete by checking for expected files/directories
+    echo "🔍 Verifying deployment..."
+    sleep 2  # Give filesystem a moment to sync
+    
+    # Wait for the specific sr.sh file to be present
+    echo "⏳ Waiting for sr.sh to be ready..."
+    RETRY_COUNT=0
+    MAX_RETRIES=30
+    
+    while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+        if ssh -i id_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$PUBLIC_IP 'test -f ~/app/feed_management_system/sr.sh' 2>/dev/null; then
+            echo "✅ sr.sh found! Deployment verified."
+            break
+        fi
+        
+        RETRY_COUNT=$((RETRY_COUNT + 1))
+        echo "   Attempt $RETRY_COUNT/$MAX_RETRIES - waiting for sr.sh..."
+        sleep 1
+    done
+    
+    if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
+        echo "❌ Timeout waiting for sr.sh to appear"
+        echo "   Files may not have copied correctly"
+        rm -rf "$TEMP_DIR"
+        return 1 2>/dev/null || true
+    fi
     
     # Fix line endings for all shell scripts
     echo "🔧 Fixing line endings for shell scripts..."
@@ -155,13 +183,14 @@ echo "   You are now in the ~/app directory on the remote server"
 echo "   Type 'exit' to return to your local machine"
 echo
 
-# Connect and change to app directory
+# Check if feed_management_system directory exists, if not use app directory
+# Connect and change to appropriate directory
 ssh -i id_rsa \
     -o StrictHostKeyChecking=no \
     -o UserKnownHostsFile=/dev/null \
     -o ServerAliveInterval=60 \
     -t ubuntu@$PUBLIC_IP \
-    'cd ~/app/feed_management_system/ && echo "=== Welcome to your Ubuntu development box ===" && echo "Current directory: $(pwd)" && echo "Files:" && ls -la && echo && echo "Installed tools:" && echo "- Python: $(python --version 2>/dev/null || echo "not found")" && echo "- Docker: $(docker --version 2>/dev/null || echo "not found")" && echo "- Node.js: $(node --version 2>/dev/null || echo "not found")" && echo && . sr.sh && exec bash'
+    'TARGET_DIR=~/app/feed_management_system; if [ ! -d "$TARGET_DIR" ]; then TARGET_DIR=~/app; fi; cd "$TARGET_DIR" && echo "=== Welcome to your Ubuntu development box ===" && echo "Current directory: $(pwd)" && echo "Files:" && ls -la && echo && echo "Installed tools:" && echo "- Python: $(python --version 2>/dev/null || echo "not found")" && echo "- Docker: $(docker --version 2>/dev/null || echo "not found")" && echo "- Node.js: $(node --version 2>/dev/null || echo "not found")" && echo && if [ -f sr.sh ]; then . sr.sh; fi && exec bash'
 
 # Check if SSH failed
 if [ $? -ne 0 ]; then

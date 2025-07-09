@@ -1,19 +1,19 @@
 -- Insert base code types
 INSERT INTO admin.code_type (code_type_cd, code_type_description) VALUES
-    ('FEED_TYPE', 'Feed Type Classifications'),
+    ('FEED_TYPE', 'Pipeline Type Classifications'),
     ('STATUS', 'Processing Status Codes'),
     ('PRIORITY', 'Priority Levels'),
-    ('FEED_STATUS', 'Feed Lifecycle Status'),
-    ('FEED_ENVIRONMENT', 'Feed Execution Environment'),
-    ('FEED_RUN_DETAIL_TYPE', 'Feed Run Detail Type')
+    ('FEED_STATUS', 'Pipeline Lifecycle Status'),
+    ('FEED_ENVIRONMENT', 'Pipeline Execution Environment'),
+    ('FEED_RUN_DETAIL_TYPE', 'Pipeline Run Detail Type')
 ON CONFLICT (code_type_cd) DO NOTHING;
 
 -- Insert system codes
 INSERT INTO admin.system_codes (common_cd, code_type_cd, code_description, sort_order) VALUES
     -- FEED_TYPE
     ('SFTP_FEED', 'FEED_TYPE', 'SFTP based', 1),
-    ('API_CALL', 'FEED_TYPE', 'API Data Feed', 2),
-    ('BATCH_PROC', 'FEED_TYPE', 'Batch Processing Feed', 3),
+    ('API_CALL', 'FEED_TYPE', 'API Data Pipeline', 2),
+    ('BATCH_PROC', 'FEED_TYPE', 'Batch Processing Pipeline', 3),
 
     -- STATUS
     ('PENDING', 'STATUS', 'Pending Execution', 1),

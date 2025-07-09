@@ -1,6 +1,6 @@
-# Feed Management System
+# Pipeline Management System
 
-A Python-based application for managing data feeds and processing runs.
+A Python-based application for managing data pipelines and processing runs.
 
 ## Architecture
 
@@ -37,7 +37,7 @@ Edit `.env` file with your database connection details.
 ## Project Structure
 
 ```
-feed_management_system/
+pipeline_management_system/
 ├── app/                    # Main application code
 │   ├── config/            # Configuration files
 │   ├── models/            # SQLAlchemy models
@@ -65,8 +65,8 @@ feed_management_system/
 The application uses the following main tables:
 - `code_type`: Code type definitions
 - `system_codes`: System enumeration values
-- `feed`: Feed configurations
-- `feed_run`: Feed execution runs
-- `feed_run_details`: Detailed run information
+- `pipeline`: Pipeline configurations
+- `pipeline_run`: Pipeline execution runs
+- `pipeline_run_details`: Detailed run information
 
 See the database schema documentation for complete details.

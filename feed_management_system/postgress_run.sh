@@ -1,6 +1,6 @@
 DB_HOST=localhost
 DB_PORT=5432
-DB_NAME=feed_management
+DB_NAME=pipeline_management
 DB_USER=your_username
 DB_PASSWORD=your_password
 

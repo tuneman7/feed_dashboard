@@ -5,8 +5,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(
-    title="Feed Management System API",
-    description="API for managing data feeds and processing runs",
+    title="Pipeline Management System API",
+    description="API for managing data pipelines and processing runs",
     version="1.0.0"
 )
 
@@ -21,7 +21,7 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
-    return {"message": "Feed Management System API", "status": "running"}
+    return {"message": "Pipeline Management System API", "status": "running"}
 
 @app.get("/health")
 async def health_check():
