@@ -75,11 +75,13 @@ CREATE TABLE IF NOT EXISTS pipeline.pipeline_run_details (
     detail_id SERIAL PRIMARY KEY,
     parent_detail_id INTEGER,
     pipeline_run_id INTEGER NOT NULL,
+    run_detail_type_cd INTEGER NOT NULL,  -- references admin.system_codes(code_id)
     detail_desc TEXT NOT NULL,
     detail_data TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (parent_detail_id) REFERENCES pipeline.pipeline_run_details(detail_id),
-    FOREIGN KEY (pipeline_run_id) REFERENCES pipeline.pipeline_run(pipeline_run_id)
+    FOREIGN KEY (pipeline_run_id) REFERENCES pipeline.pipeline_run(pipeline_run_id),
+    FOREIGN KEY (run_detail_type_cd) REFERENCES admin.system_codes(code_id)    
 );
 
 -- Create pipeline_details table in pipeline schema
