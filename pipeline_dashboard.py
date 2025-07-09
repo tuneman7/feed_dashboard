@@ -19,7 +19,7 @@ class PipelineDatabase:
         """Get database configuration from AWS Secrets Manager."""
         secret_name = f"dst-pipeline-db-config-{self.environment}"
         
-        client = boto3.client('secretsmanager')
+        client = boto3.client('secretsmanager', region_name='us-east-1')
         response = client.get_secret_value(SecretId=secret_name)
         return json.loads(response['SecretString'])
     
@@ -90,7 +90,7 @@ class PipelineDatabase:
         with self.connection.cursor() as cursor:
             cursor.execute(
                 "SELECT add_pipeline_run_detail(%s, %s, %s, %s)",
-                (pipeline_run_id, common_cd, detail_desc, detail_data)
+                (pipeline_run_id, common_cd, detail_data, detail_desc)
             )
             result = cursor.fetchone()
             return result[0]

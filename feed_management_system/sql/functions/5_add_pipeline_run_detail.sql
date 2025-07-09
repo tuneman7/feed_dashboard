@@ -1,8 +1,8 @@
 CREATE OR REPLACE FUNCTION add_pipeline_run_detail(
     p_pipeline_run_id INTEGER,
     p_common_cd VARCHAR(50),
-    p_detail_desc TEXT DEFAULT NULL,
-    p_detail_data TEXT
+    p_detail_data TEXT,
+    p_detail_desc TEXT DEFAULT NULL
 )
 RETURNS INTEGER
 LANGUAGE plpgsql
