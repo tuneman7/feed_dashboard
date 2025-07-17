@@ -638,13 +638,22 @@ def admin_pipelines():
                 if confirm_delete:
                     if st.button("🗑️ DELETE PIPELINE", type="secondary"):
                         try:
+
                             # Delete in correct order to handle foreign key constraints
                             delete_queries = [
-                                "DELETE FROM pipeline.pipeline_details WHERE pipeline_id = %s;",
+                                # First: Delete pipeline_run_details (references pipeline_run)
+                                "DELETE FROM pipeline.pipeline_run_details WHERE pipeline_run_id IN (SELECT pipeline_run_id FROM pipeline.pipeline_run WHERE pipeline_id = %s);",
+                                # Second: Delete pipeline_run (references pipeline and pipeline_environment)
                                 "DELETE FROM pipeline.pipeline_run WHERE pipeline_id = %s;",
+                                # Third: Delete pipeline_details (references pipeline and pipeline_environment)
+                                "DELETE FROM pipeline.pipeline_details WHERE pipeline_id = %s;",
+                                # Fourth: Delete pipeline_environment (references pipeline)
                                 "DELETE FROM pipeline.pipeline_environment WHERE pipeline_id = %s;",
+                                # Finally: Delete the pipeline itself
                                 "DELETE FROM pipeline.pipeline WHERE pipeline_id = %s;"
                             ]
+
+
                             
                             success = True
                             for query in delete_queries:

@@ -44,7 +44,9 @@ INSERT INTO admin.system_codes (common_cd, code_type_cd, code_description, sort_
     ('ECS_CONTAINER_LINK', 'PIPELINE_RUN_DETAIL_TYPE', 'Link to ECS container', 2),
     ('HTML_CHUNK', 'PIPELINE_RUN_DETAIL_TYPE', 'HTML snippet or result', 3),
     ('AWS_CLI_COMMAND', 'PIPELINE_RUN_DETAIL_TYPE', 'AWS cli batch command', 4),
-    ('PYTHON_CODE_SNIPPET', 'PIPELINE_RUN_DETAIL_TYPE', 'Python code snippet', 5)
+    ('PYTHON_CODE_SNIPPET', 'PIPELINE_RUN_DETAIL_TYPE', 'Python code snippet', 5),
+    ('JIRA_MAINT_PARENT_TICKET', 'PIPELINE_RUN_DETAIL_TYPE', 'Pipeline maint jira ticket.', 6),
+    ('TOTAL_PROCESSED_COUNT', 'PIPELINE_RUN_DETAIL_TYPE', 'Pipeline maint jira ticket.', 7)
 
 
 ON CONFLICT (common_cd, code_type_cd) DO NOTHING;
