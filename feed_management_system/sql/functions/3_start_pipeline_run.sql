@@ -57,8 +57,8 @@ BEGIN
             'SFTP_PIPELINE',
             'PIPELINE_TYPE',
             v_pipeline_status_id,
-            'Auto Created for: ' || p_pipeline_tag,
-            'Auto Created for: ' || p_pipeline_tag,
+            p_pipeline_tag,
+            p_pipeline_tag,
             p_pipeline_tag,
             TRUE
         ) RETURNING pipeline_id INTO v_pipeline_id;

@@ -122,6 +122,26 @@ if ! ssh -i id_rsa -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnown
     return 1 2>/dev/null || true
 fi
 
+# Kill any existing Streamlit processes before deployment
+echo "🔄 Stopping any running Streamlit applications..."
+ssh -i id_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$PUBLIC_IP '
+    # Kill streamlit processes
+    pkill -f streamlit 2>/dev/null || true
+    pkill -f "python.*streamlit" 2>/dev/null || true
+    
+    # Wait a moment for processes to terminate
+    sleep 2
+    
+    # Check if any streamlit processes are still running
+    if pgrep -f streamlit >/dev/null 2>&1; then
+        echo "   Force killing remaining streamlit processes..."
+        pkill -9 -f streamlit 2>/dev/null || true
+        sleep 1
+    fi
+    
+    echo "   Streamlit processes stopped"
+' || echo "   Note: No streamlit processes were running"
+
 # Clear the app directory and copy new files
 ssh -i id_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$PUBLIC_IP 'rm -rf ~/app && mkdir -p ~/app'
 
