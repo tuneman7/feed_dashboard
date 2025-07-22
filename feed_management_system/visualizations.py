@@ -128,9 +128,11 @@ def visualizations_page():
     else:
         st.info("No data available for daily runs trend")
     
+    # Replace the Pipeline Execution Duration Analysis section (lines ~130-170) with this:
+
     # Pipeline Execution Duration Analysis
     st.subheader("⏱️ Pipeline Execution Duration Analysis")
-    
+
     duration_data = execute_query("""
         SELECT 
             f.pipeline_name,
@@ -143,49 +145,59 @@ def visualizations_page():
             AND fr.status_cd = 'COMPLETED'
         ORDER BY duration_minutes DESC;
     """)
-    
+
     if not duration_data.empty:
-        col1, col2 = st.columns(2)
+        # Ensure duration_minutes is numeric and handle any conversion errors
+        duration_data['duration_minutes'] = pd.to_numeric(duration_data['duration_minutes'], errors='coerce')
         
-        with col1:
-            # Average duration by pipeline type
-            avg_duration = duration_data.groupby('pipeline_type_cd')['duration_minutes'].mean().reset_index()
-            avg_duration['duration_minutes'] = avg_duration['duration_minutes'].round(2)
-            
-            fig = px.bar(
-                avg_duration,
-                x='pipeline_type_cd',
-                y='duration_minutes',
-                title='Average Execution Duration by Pipeline Type',
-                labels={'duration_minutes': 'Duration (Minutes)', 'pipeline_type_cd': 'Pipeline Type'}
-            )
-            st.plotly_chart(fig, use_container_width=True)
+        # Remove any rows where duration couldn't be converted to numeric
+        duration_data = duration_data.dropna(subset=['duration_minutes'])
         
-        with col2:
-            # Top 10 longest running pipelines
-            top_long_runs = duration_data.nlargest(10, 'duration_minutes')
+        if not duration_data.empty:
+            col1, col2 = st.columns(2)
             
-            fig = px.bar(
-                top_long_runs,
-                x='duration_minutes',
-                y='pipeline_name',
-                orientation='h',
-                title='Top 10 Longest Running Pipelines (30 Days)',
-                labels={'duration_minutes': 'Duration (Minutes)', 'pipeline_name': 'Pipeline Name'}
-            )
-            st.plotly_chart(fig, use_container_width=True)
+            with col1:
+                # Average duration by pipeline type
+                avg_duration = duration_data.groupby('pipeline_type_cd')['duration_minutes'].mean().reset_index()
+                avg_duration['duration_minutes'] = avg_duration['duration_minutes'].round(2)
+                
+                fig = px.bar(
+                    avg_duration,
+                    x='pipeline_type_cd',
+                    y='duration_minutes',
+                    title='Average Execution Duration by Pipeline Type',
+                    labels={'duration_minutes': 'Duration (Minutes)', 'pipeline_type_cd': 'Pipeline Type'}
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            
+            with col2:
+                # Top 10 longest running pipelines
+                top_long_runs = duration_data.nlargest(10, 'duration_minutes')
+                
+                fig = px.bar(
+                    top_long_runs,
+                    x='duration_minutes',
+                    y='pipeline_name',
+                    orientation='h',
+                    title='Top 10 Longest Running Pipelines (30 Days)',
+                    labels={'duration_minutes': 'Duration (Minutes)', 'pipeline_name': 'Pipeline Name'}
+                )
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No valid duration data available after data cleaning")
     else:
         st.info("No duration data available")
-    
+
+
     # Processing Volume Analysis
     st.subheader("📊 Processing Volume Analysis")
-    
+
     volume_data = execute_query("""
         SELECT 
             f.pipeline_name,
             f.pipeline_type_cd,
             DATE(fr.start_dt) as run_date,
-            CAST(REPLACE(prd.detail_data, ',', '') AS INTEGER) as processed_count
+            CAST(REPLACE(prd.detail_data, ',', '') AS BIGINT) as processed_count
         FROM pipeline.pipeline_run fr
         JOIN pipeline.pipeline f ON fr.pipeline_id = f.pipeline_id
         JOIN pipeline.pipeline_run_details prd ON fr.pipeline_run_id = prd.pipeline_run_id
@@ -196,51 +208,63 @@ def visualizations_page():
             AND prd.detail_data ~ '^[0-9,]+$'  -- Only numeric values
         ORDER BY run_date DESC;
     """)
-    
+
     if not volume_data.empty:
-        # Daily processing volume trend
-        daily_volume = volume_data.groupby('run_date')['processed_count'].sum().reset_index()
+        # Ensure processed_count is numeric (additional safety check)
+        volume_data['processed_count'] = pd.to_numeric(volume_data['processed_count'], errors='coerce')
+        volume_data = volume_data.dropna(subset=['processed_count'])
         
-        fig = px.line(
-            daily_volume,
-            x='run_date',
-            y='processed_count',
-            title='Daily Processing Volume Trend (30 Days)',
-            labels={'processed_count': 'Total Records Processed', 'run_date': 'Date'}
-        )
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Volume by pipeline type
-        type_volume = volume_data.groupby('pipeline_type_cd')['processed_count'].sum().reset_index()
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            fig = px.pie(
-                type_volume,
-                values='processed_count',
-                names='pipeline_type_cd',
-                title='Processing Volume by Pipeline Type (30 Days)'
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            # Top processing pipelines
-            top_processors = volume_data.groupby('pipeline_name')['processed_count'].sum().reset_index()
-            top_processors = top_processors.nlargest(10, 'processed_count')
+        if not volume_data.empty:
+            # Daily processing volume trend
+            daily_volume = volume_data.groupby('run_date')['processed_count'].sum().reset_index()
             
-            fig = px.bar(
-                top_processors,
-                x='processed_count',
-                y='pipeline_name',
-                orientation='h',
-                title='Top 10 Processing Pipelines by Volume (30 Days)',
-                labels={'processed_count': 'Total Records Processed', 'pipeline_name': 'Pipeline Name'}
+            fig = px.line(
+                daily_volume,
+                x='run_date',
+                y='processed_count',
+                title='Daily Processing Volume Trend (30 Days)',
+                labels={'processed_count': 'Total Records Processed', 'run_date': 'Date'}
             )
+            # Correct method for Plotly Express figures
+            fig.update_layout(yaxis_tickformat=',.0f')  # Format large numbers with commas
             st.plotly_chart(fig, use_container_width=True)
+            
+            # Volume by pipeline type
+            type_volume = volume_data.groupby('pipeline_type_cd')['processed_count'].sum().reset_index()
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                fig = px.pie(
+                    type_volume,
+                    values='processed_count',
+                    names='pipeline_type_cd',
+                    title='Processing Volume by Pipeline Type (30 Days)'
+                )
+                fig.update_traces(texttemplate='%{label}<br>%{value:,.0f}')  # Format pie chart labels
+                st.plotly_chart(fig, use_container_width=True)
+            
+            with col2:
+                # Top processing pipelines
+                top_processors = volume_data.groupby('pipeline_name')['processed_count'].sum().reset_index()
+                top_processors = top_processors.nlargest(10, 'processed_count')
+                
+                fig = px.bar(
+                    top_processors,
+                    x='processed_count',
+                    y='pipeline_name',
+                    orientation='h',
+                    title='Top 10 Processing Pipelines by Volume (30 Days)',
+                    labels={'processed_count': 'Total Records Processed', 'pipeline_name': 'Pipeline Name'}
+                )
+                # Correct method for Plotly Express figures
+                fig.update_layout(xaxis_tickformat=',.0f')  # Format x-axis with commas
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No valid processing volume data available after data cleaning")
     else:
-        st.info("No processing volume data available")
-    
+        st.info("No processing volume data available")        
+
     # Raw Data Tables
     st.subheader("📋 Raw Data")
     
@@ -345,6 +369,11 @@ def visualizations_page():
         """)
         
         if not performance_metrics.empty:
+            # Convert numeric columns to proper data types
+            performance_metrics['success_rate'] = pd.to_numeric(performance_metrics['success_rate'], errors='coerce')
+            performance_metrics['avg_duration_minutes'] = pd.to_numeric(performance_metrics['avg_duration_minutes'], errors='coerce')
+            performance_metrics['total_runs'] = pd.to_numeric(performance_metrics['total_runs'], errors='coerce')
+            
             st.dataframe(performance_metrics, use_container_width=True)
             
             # Performance insights
@@ -354,18 +383,36 @@ def visualizations_page():
             
             with col1:
                 # Best performing pipelines (highest success rate)
-                best_performers = performance_metrics[performance_metrics['total_runs'] >= 5].nlargest(5, 'success_rate')
-                if not best_performers.empty:
+                # Filter for pipelines with at least 5 runs and non-null success rates
+                eligible_performers = performance_metrics[
+                    (performance_metrics['total_runs'] >= 5) & 
+                    (performance_metrics['success_rate'].notna())
+                ]
+                
+                if not eligible_performers.empty:
+                    best_performers = eligible_performers.nlargest(5, 'success_rate')
                     st.write("**Top 5 Best Performing Pipelines (5+ runs):**")
                     for _, row in best_performers.iterrows():
-                        st.write(f"• {row['pipeline_name']}: {row['success_rate']}% success rate")
+                        success_rate = row['success_rate']
+                        if pd.notna(success_rate):
+                            st.write(f"• {row['pipeline_name']}: {success_rate}% success rate")
+                else:
+                    st.write("**Top 5 Best Performing Pipelines (5+ runs):**")
+                    st.write("No pipelines with sufficient runs found")
             
             with col2:
                 # Fastest pipelines (lowest average duration)
-                fastest_pipelines = performance_metrics[performance_metrics['avg_duration_minutes'].notna()].nsmallest(5, 'avg_duration_minutes')
-                if not fastest_pipelines.empty:
+                eligible_fastest = performance_metrics[performance_metrics['avg_duration_minutes'].notna()]
+                
+                if not eligible_fastest.empty:
+                    fastest_pipelines = eligible_fastest.nsmallest(5, 'avg_duration_minutes')
                     st.write("**Top 5 Fastest Pipelines:**")
                     for _, row in fastest_pipelines.iterrows():
-                        st.write(f"• {row['pipeline_name']}: {row['avg_duration_minutes']} min avg")
+                        duration = row['avg_duration_minutes']
+                        if pd.notna(duration):
+                            st.write(f"• {row['pipeline_name']}: {duration} min avg")
+                else:
+                    st.write("**Top 5 Fastest Pipelines:**")
+                    st.write("No duration data available")
         else:
             st.info("No performance metrics available")
