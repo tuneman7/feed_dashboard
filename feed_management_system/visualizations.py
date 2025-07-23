@@ -265,6 +265,124 @@ def visualizations_page():
     else:
         st.info("No processing volume data available")        
 
+
+# Add this panel after the Processing Volume Analysis section
+
+    # Time Series by Pipeline
+    st.subheader("📈 Records Processed by Pipeline (Time Series)")
+
+    pipeline_timeseries_data = execute_query("""
+        SELECT 
+            f.pipeline_name,
+            f.pipeline_type_cd,
+            DATE(fr.start_dt) as run_date,
+            CAST(REPLACE(prd.detail_data, ',', '') AS BIGINT) as processed_count
+        FROM pipeline.pipeline_run fr
+        JOIN pipeline.pipeline f ON fr.pipeline_id = f.pipeline_id
+        JOIN pipeline.pipeline_run_details prd ON fr.pipeline_run_id = prd.pipeline_run_id
+        JOIN admin.system_codes sc ON prd.run_detail_type_cd = sc.code_id
+        WHERE sc.common_cd = 'TOTAL_PROCESSED_COUNT'
+            AND sc.code_type_cd = 'PIPELINE_RUN_DETAIL_TYPE'
+            AND fr.start_dt >= CURRENT_DATE - INTERVAL '30 days'
+            AND prd.detail_data ~ '^[0-9,]+$'  -- Only numeric values
+            AND fr.status_cd = 'COMPLETED'  -- Only successful runs
+        ORDER BY f.pipeline_name, run_date;
+    """)
+
+    if not pipeline_timeseries_data.empty:
+        # Ensure processed_count is numeric and handle any conversion errors
+        pipeline_timeseries_data['processed_count'] = pd.to_numeric(pipeline_timeseries_data['processed_count'], errors='coerce')
+        pipeline_timeseries_data = pipeline_timeseries_data.dropna(subset=['processed_count'])
+        
+        # Filter out zero values for log scale (can't take log of 0)
+        pipeline_timeseries_data = pipeline_timeseries_data[pipeline_timeseries_data['processed_count'] > 0]
+        
+        if not pipeline_timeseries_data.empty:
+            # Apply log transformation to handle vastly different scales
+            import numpy as np
+            pipeline_timeseries_data['log_processed_count'] = np.log10(pipeline_timeseries_data['processed_count'])
+            
+            # Create the time series line chart with separate lines for each pipeline
+            fig = go.Figure()
+            
+            # Get unique pipelines and add a line for each
+            unique_pipelines = pipeline_timeseries_data['pipeline_name'].unique()
+            
+            # Use a color palette that cycles through colors
+            colors = px.colors.qualitative.Set1 + px.colors.qualitative.Set2 + px.colors.qualitative.Pastel1
+            
+            for i, pipeline in enumerate(unique_pipelines):
+                pipeline_data = pipeline_timeseries_data[pipeline_timeseries_data['pipeline_name'] == pipeline]
+                
+                # Group by date and sum in case there are multiple runs per day
+                daily_pipeline_data = pipeline_data.groupby('run_date').agg({
+                    'processed_count': 'sum',
+                    'log_processed_count': lambda x: np.log10(x.sum() if (x.sum() > 0) else 1)  # Recalculate log for summed values
+                }).reset_index()
+                
+                fig.add_trace(go.Scatter(
+                    x=daily_pipeline_data['run_date'],
+                    y=daily_pipeline_data['log_processed_count'],
+                    mode='lines+markers',
+                    name=pipeline,
+                    line=dict(color=colors[i % len(colors)]),
+                    hovertemplate='<b>%{fullData.name}</b><br>' +
+                                'Date: %{x}<br>' +
+                                'Records: %{customdata:,.0f}<br>' +
+                                'Log₁₀(Records): %{y:.2f}<extra></extra>',
+                    customdata=daily_pipeline_data['processed_count']
+                ))
+            
+            fig.update_layout(
+                title='Records Processed by Pipeline Over Time (Log Scale)',
+                xaxis_title='Date',
+                yaxis_title='Log₁₀(Records Processed)',
+                hovermode='x unified',
+                legend=dict(
+                    orientation="v",
+                    yanchor="top",
+                    y=1,
+                    xanchor="left",
+                    x=1.02
+                ),
+                margin=dict(r=150, b=100)  # Add right margin for legend and bottom margin for note
+            )
+            
+            # Add annotation explaining the log scale
+            fig.add_annotation(
+                text="Note: Y-axis uses log₁₀ scale to handle vastly different processing volumes.<br>" +
+                    "Hover over points to see actual record counts.",
+                xref="paper", yref="paper",
+                x=0, y=-0.25,
+                showarrow=False,
+                font=dict(size=10, color="gray"),
+                align="left"
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Add a summary table showing the scale differences
+            st.subheader("Pipeline Processing Scale Summary")
+            
+            scale_summary = pipeline_timeseries_data.groupby('pipeline_name').agg({
+                'processed_count': ['min', 'max', 'mean', 'sum']
+            }).round(0)
+            
+            # Flatten column names
+            scale_summary.columns = ['Min Records', 'Max Records', 'Avg Records', 'Total Records']
+            scale_summary = scale_summary.reset_index()
+            
+            # Format large numbers with commas
+            for col in ['Min Records', 'Max Records', 'Avg Records', 'Total Records']:
+                scale_summary[col] = scale_summary[col].apply(lambda x: f"{int(x):,}")
+            
+            st.dataframe(scale_summary, use_container_width=True)
+            
+        else:
+            st.info("No valid processing data available after filtering for positive values")
+    else:
+        st.info("No pipeline processing time series data available")
+
     # Raw Data Tables
     st.subheader("📋 Raw Data")
     
@@ -416,3 +534,4 @@ def visualizations_page():
                     st.write("No duration data available")
         else:
             st.info("No performance metrics available")
+
