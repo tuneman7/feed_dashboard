@@ -5,6 +5,7 @@ Database setup and initialization functionality
 import streamlit as st
 import glob
 import os
+import pandas as pd
 from database_utils import init_connection, execute_query
 
 def clear_database():

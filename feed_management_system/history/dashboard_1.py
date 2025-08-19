@@ -9,77 +9,35 @@ def dashboard():
     """Main dashboard with overview"""
     st.header("📊 Pipeline Management Dashboard")
     
-    # Get environment selection first (moved from filters section)
-    environments_query = """
-    SELECT DISTINCT env_sc.common_cd as environment
-    FROM pipeline.pipeline_environment pe
-    JOIN admin.system_codes env_sc ON pe.env_system_cd = env_sc.code_id
-    ORDER BY env_sc.common_cd;
-    """
-    environments_df = execute_query(environments_query)
-    
-    # Create dropdown for environment selection at the top
-    environment_options = ['All'] + environments_df['environment'].tolist()
-    selected_environment = st.selectbox(
-        "Select Environment:",
-        options=environment_options,
-        index=0  # Default to 'All'
-    )
-    
-    # Build environment filter for stats queries
-    stats_environment_filter = ""
-    if selected_environment != 'All':
-        stats_environment_filter = f"""
-        JOIN pipeline.pipeline_environment pe ON p.pipeline_id = pe.pipeline_id
-        JOIN admin.system_codes env_sc ON pe.env_system_cd = env_sc.code_id
-        AND env_sc.common_cd = '{selected_environment}'
-        """
-        
-        runs_environment_filter = f"""
-        JOIN pipeline.pipeline_environment pe ON pr.environment_id = pe.environment_id
-        JOIN admin.system_codes env_sc ON pe.env_system_cd = env_sc.code_id
-        AND env_sc.common_cd = '{selected_environment}'
-        """
-    else:
-        runs_environment_filter = ""
-    
-    # Quick stats (now reactive to environment)
+    # Quick stats
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        pipelines_count = execute_query(f"""
-            SELECT COUNT(*) as count 
-            FROM pipeline.pipeline p
-            {stats_environment_filter}
-            WHERE p.is_active = true;
-        """)
+        pipelines_count = execute_query("SELECT COUNT(*) as count FROM pipeline.pipeline WHERE is_active = true;")
         count = pipelines_count.iloc[0, 0] if not pipelines_count.empty else 0
         st.metric("Active Pipelines", count)
     
     with col2:
-        runs_today = execute_query(f"""
-            SELECT COUNT(*) as count 
-            FROM pipeline.pipeline_run pr
-            {runs_environment_filter}
-            WHERE DATE(pr.start_dt) = CURRENT_DATE;
+        runs_today = execute_query("""
+            SELECT COUNT(*) as count FROM pipeline.pipeline_run 
+            WHERE DATE(start_dt) = CURRENT_DATE;
         """)
         count = runs_today.iloc[0, 0] if not runs_today.empty else 0
         st.metric("Runs Today", count)
     
     with col3:
-        success_rate = execute_query(f"""
+        success_rate = execute_query("""
             SELECT 
                 COALESCE(
                     ROUND(
-                        COUNT(CASE WHEN pr.status_cd = 'COMPLETED' THEN 1 END) * 100.0 / 
+                        COUNT(CASE WHEN status_cd = 'COMPLETED' THEN 1 END) * 100.0 / 
                         NULLIF(COUNT(*), 0), 
                         1
                     ), 0
                 ) as success_rate
-            FROM pipeline.pipeline_run pr
-            {runs_environment_filter}
-            WHERE pr.start_dt >= CURRENT_DATE - INTERVAL '30 days'
-                AND pr.status_cd IN ('COMPLETED', 'FAILED');
+            FROM pipeline.pipeline_run 
+            WHERE start_dt >= CURRENT_DATE - INTERVAL '30 days'
+                AND status_cd IN ('COMPLETED', 'FAILED');
         """)
         rate = success_rate.iloc[0, 0] if not success_rate.empty else 0
         st.metric("30-Day Success Rate", f"{rate}%")
@@ -92,41 +50,27 @@ def dashboard():
     # Recent activity
     st.subheader("🕒 Recent Pipeline Runs")
 
-    # Create column for pipeline filter (environment filter already selected above)
-    filter_col1, filter_col2 = st.columns(2)
-    
-    with filter_col1:
-        st.write(f"**Environment:** {selected_environment}")
-    
-    with filter_col2:
-        # Get available pipelines
-        pipelines_query = """
-        SELECT DISTINCT pipeline_name
-        FROM pipeline.pipeline
-        WHERE is_active = true
-        ORDER BY pipeline_name;
-        """
-        pipelines_df = execute_query(pipelines_query)
+    # Get available environments
+    environments_query = """
+    SELECT DISTINCT env_sc.common_cd as environment
+    FROM pipeline.pipeline_environment pe
+    JOIN admin.system_codes env_sc ON pe.env_system_cd = env_sc.code_id
+    ORDER BY env_sc.common_cd;
+    """
+    environments_df = execute_query(environments_query)
 
-        # Create multiselect for pipeline selection
-        pipeline_options = pipelines_df['pipeline_name'].tolist()
-        selected_pipelines = st.multiselect(
-            "Select Pipeline(s):",
-            options=pipeline_options,
-            default=[],  # Default to empty (All)
-            placeholder="All pipelines"
-        )
+    # Create dropdown for environment selection
+    environment_options = ['All'] + environments_df['environment'].tolist()
+    selected_environment = st.selectbox(
+        "Select Environment:",
+        options=environment_options,
+        index=0  # Default to 'All'
+    )
 
-    # Build the WHERE clause based on selections
+    # Build the WHERE clause based on selection
     environment_filter = ""
     if selected_environment != 'All':
         environment_filter = f"AND env_sc.common_cd = '{selected_environment}'"
-    
-    pipeline_filter = ""
-    if selected_pipelines:
-        # Convert list to SQL IN clause
-        pipeline_names = "', '".join(selected_pipelines)
-        pipeline_filter = f"AND f.pipeline_name IN ('{pipeline_names}')"
 
     recent_runs = execute_query(f"""
 -- Get top 10 failed runs plus other runs, limited to 60 total
@@ -161,7 +105,6 @@ WITH failed_runs AS (
     WHERE sc.code_type_cd = 'STATUS'
         AND (UPPER(sc.code_description) LIKE '%FAIL%' OR UPPER(sc.code_description) LIKE '%ERROR%')
         {environment_filter}
-        {pipeline_filter}
     ORDER BY fr.start_dt DESC
     LIMIT 10
 ),
@@ -200,7 +143,6 @@ other_runs AS (
     WHERE sc.code_type_cd = 'STATUS'
         AND NOT (UPPER(sc.code_description) LIKE '%FAIL%' OR UPPER(sc.code_description) LIKE '%ERROR%')
         {environment_filter}
-        {pipeline_filter}
     ORDER BY priority_order, fr.start_dt DESC
     LIMIT 50
 )

@@ -10,10 +10,10 @@ echo
 
 # Configuration - these will be substituted by Terraform
 RDS_INSTANCE="dst-dashboard-database-fast"
-EC2_INSTANCE_ID="i-003b289714d54b611"
-EC2_SECURITY_GROUP_ID="sg-01da7476096196601"
-EC2_PUBLIC_IP="34.239.138.193"
-USER_LOCAL_IP="68.107.83.168"
+EC2_INSTANCE_ID="i-0b5275a0a92d64c4f"
+EC2_SECURITY_GROUP_ID="sg-052c09d83cc6009e1"
+EC2_PUBLIC_IP="54.161.30.73"
+USER_LOCAL_IP="97.178.68.112"
 
 # Validation
 if [ -z "$RDS_INSTANCE" ]; then
