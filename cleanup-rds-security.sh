@@ -12,10 +12,10 @@ echo
 
 # Configuration
 RDS_INSTANCE="dst-dashboard-database-fast"
-EC2_INSTANCE_ID="i-0ae2ed89e0b3bc9df"
-EC2_SECURITY_GROUP_ID="sg-0d91d1ae3eee3fc35"
-EC2_PUBLIC_IP="54.87.139.183"
-USER_LOCAL_IP="172.56.234.126"
+EC2_INSTANCE_ID="i-00559d0d757fdc035"
+EC2_SECURITY_GROUP_ID="sg-0eb42849713a2de79"
+EC2_PUBLIC_IP="3.90.37.164"
+USER_LOCAL_IP="172.56.235.52"
 
 if [ -z "$RDS_INSTANCE" ]; then
     echo "❌ No RDS instance identifier provided"

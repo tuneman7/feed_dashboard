@@ -1,13 +1,19 @@
 #!/bin/bash
+
 source ./venv-bootstrap.sh
+
 APP="streamlit_app.py"
 LOG_FILE="streamlit.log"
 PID_FILE=".streamlit_pid"
 ENV_FILE="db.env"
 
 select_database() {
-  # Default to option 3 without prompting
-  choice=3
+  echo "Select database to connect to:"
+  echo "1) Local (.env-based)"
+  echo "2) AWS RDS (dst-pipeline-dashboard)"
+  echo "3) AWS RDS (dst-dashboard-fast)"
+  read -rp "Enter choice [1-3]: " choice
+
   case "$choice" in
     1)
       DB_HOST="localhost"
@@ -24,6 +30,7 @@ select_database() {
       DB_PASSWORD="Dashboard2025!$"
       ;;
     3)
+               
       DB_HOST="dst-dashboard-database-fast.ckqboenmhdca.us-east-1.rds.amazonaws.com"
       DB_PORT="5432"
       DB_NAME="pipeline_management"
@@ -36,6 +43,7 @@ select_database() {
       return
       ;;
   esac
+
   # Write values to db.env (with quoting for special characters)
   cat > "$ENV_FILE" <<EOF
 DB_HOST="$DB_HOST"
@@ -44,9 +52,11 @@ DB_NAME="$DB_NAME"
 DB_USER="$DB_USER"
 DB_PASSWORD="$DB_PASSWORD"
 EOF
+
   # Export values for current shell
   export DB_HOST DB_PORT DB_NAME DB_USER DB_PASSWORD
-  echo "✅ Environment configured and exported (using AWS RDS dst-dashboard-fast)."
+
+  echo "✅ Environment configured and exported."
 }
 
 start_streamlit() {
@@ -79,21 +89,27 @@ select_database
 # Start Streamlit and tail log
 start_streamlit
 
-# Kill the tail process and exit, leaving Streamlit running in background
-if [ -n "$TAIL_PID" ]; then
-  kill "$TAIL_PID" 2>/dev/null
-fi
-
-echo "🎉 Streamlit is running in the background with PID $(cat $PID_FILE)"
-echo "📋 To check status: ps aux | grep streamlit"
-echo "📋 To view logs: tail -f $LOG_FILE"
-echo "📋 To stop: kill \$(cat $PID_FILE)"
-
-# **PRINT OUT THE PORTS**
-echo ""
-echo "🌐 Access URLs:"
-echo "   Local: http://localhost:8501"
-echo "   External: http://$(curl -s http://checkip.amazonaws.com/):8501"
-
-# **EXPLICIT EXIT COMMAND**
-exit 0
+# Interactive control loop
+while true; do
+  echo -n "[K]ill / [R]estart / [Q]uit: "
+  read -r action
+  case "$action" in
+    [Kk])
+      kill_streamlit
+      echo "✅ Streamlit stopped."
+      break
+      ;;
+    [Rr])
+      kill_streamlit
+      select_database
+      start_streamlit
+      ;;
+    [Qq])
+      echo "👋 Goodbye."
+      break
+      ;;
+    *)
+      echo "Invalid option. Please choose K, R, or Q."
+      ;;
+  esac
+done

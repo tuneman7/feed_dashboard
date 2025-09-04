@@ -46,3 +46,4 @@ python-dotenv
 plotly
 pgadmin4
 
+bcrypt>=4.1.2

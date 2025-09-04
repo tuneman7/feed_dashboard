@@ -1,14 +1,35 @@
-# dashboard.py
 """
-Main dashboard functionality
+Main dashboard functionality (with delete-run action for running pipelines)
 """
 import streamlit as st
 from database_utils import execute_query
 
+
+def _delete_single_run(run_id: int) -> bool:
+    """Delete a single pipeline run and its descendant attributes."""
+    try:
+        # Delete details first (FK to pipeline_run)
+        execute_query(
+            "DELETE FROM pipeline.pipeline_run_details WHERE pipeline_run_id = %s;",
+            (run_id,),
+            fetch=False,
+        )
+        # Delete the run itself
+        execute_query(
+            "DELETE FROM pipeline.pipeline_run WHERE pipeline_run_id = %s;",
+            (run_id,),
+            fetch=False,
+        )
+        return True
+    except Exception as e:
+        st.error(f"Failed to delete run {run_id}: {e}")
+        return False
+
+
 def dashboard():
     """Main dashboard with overview"""
     st.header("📊 Pipeline Management Dashboard")
-    
+
     # Get environment selection first (moved from filters section)
     environments_query = """
     SELECT DISTINCT env_sc.common_cd as environment
@@ -17,7 +38,7 @@ def dashboard():
     ORDER BY env_sc.common_cd;
     """
     environments_df = execute_query(environments_query)
-    
+
     # Create dropdown for environment selection at the top
     environment_options = ['All'] + environments_df['environment'].tolist()
     selected_environment = st.selectbox(
@@ -25,7 +46,7 @@ def dashboard():
         options=environment_options,
         index=0  # Default to 'All'
     )
-    
+
     # Build environment filter for stats queries
     stats_environment_filter = ""
     if selected_environment != 'All':
@@ -34,7 +55,7 @@ def dashboard():
         JOIN admin.system_codes env_sc ON pe.env_system_cd = env_sc.code_id
         AND env_sc.common_cd = '{selected_environment}'
         """
-        
+
         runs_environment_filter = f"""
         JOIN pipeline.pipeline_environment pe ON pr.environment_id = pe.environment_id
         JOIN admin.system_codes env_sc ON pe.env_system_cd = env_sc.code_id
@@ -42,10 +63,10 @@ def dashboard():
         """
     else:
         runs_environment_filter = ""
-    
+
     # Quick stats (now reactive to environment)
     col1, col2, col3, col4 = st.columns(4)
-    
+
     with col1:
         pipelines_count = execute_query(f"""
             SELECT COUNT(*) as count 
@@ -55,7 +76,7 @@ def dashboard():
         """)
         count = pipelines_count.iloc[0, 0] if not pipelines_count.empty else 0
         st.metric("Active Pipelines", count)
-    
+
     with col2:
         runs_today = execute_query(f"""
             SELECT COUNT(*) as count 
@@ -65,7 +86,7 @@ def dashboard():
         """)
         count = runs_today.iloc[0, 0] if not runs_today.empty else 0
         st.metric("Runs Today", count)
-    
+
     with col3:
         success_rate = execute_query(f"""
             SELECT 
@@ -83,21 +104,21 @@ def dashboard():
         """)
         rate = success_rate.iloc[0, 0] if not success_rate.empty else 0
         st.metric("30-Day Success Rate", f"{rate}%")
-    
+
     with col4:
         system_codes_count = execute_query("SELECT COUNT(*) as count FROM admin.system_codes WHERE is_active = true;")
         count = system_codes_count.iloc[0, 0] if not system_codes_count.empty else 0
         st.metric("Active System Codes", count)
-    
+
     # Recent activity
     st.subheader("🕒 Recent Pipeline Runs")
 
     # Create column for pipeline filter (environment filter already selected above)
     filter_col1, filter_col2 = st.columns(2)
-    
+
     with filter_col1:
         st.write(f"**Environment:** {selected_environment}")
-    
+
     with filter_col2:
         # Get available pipelines
         pipelines_query = """
@@ -121,7 +142,7 @@ def dashboard():
     environment_filter = ""
     if selected_environment != 'All':
         environment_filter = f"AND env_sc.common_cd = '{selected_environment}'"
-    
+
     pipeline_filter = ""
     if selected_pipelines:
         # Convert list to SQL IN clause
@@ -132,9 +153,11 @@ def dashboard():
 -- Get top 10 failed runs plus other runs, limited to 60 total
 WITH failed_runs AS (
     SELECT 
+        fr.pipeline_run_id,
         f.pipeline_name, 
         env_sc.common_cd as environment,                                
-        sc.common_cd as status,                                 
+        sc.common_cd as status,
+        sc.code_description as status_desc,
         cw_detail.detail_data as cloudwatch_url,
         count_detail.detail_data AS total_processed_count,
         fr.start_dt, 
@@ -167,9 +190,11 @@ WITH failed_runs AS (
 ),
 other_runs AS (
     SELECT 
+        fr.pipeline_run_id,
         f.pipeline_name, 
         env_sc.common_cd as environment,                                
-        sc.common_cd as status,                                 
+        sc.common_cd as status,
+        sc.code_description as status_desc,
         cw_detail.detail_data as cloudwatch_url,
         count_detail.detail_data AS total_processed_count,
         fr.start_dt, 
@@ -205,9 +230,11 @@ other_runs AS (
     LIMIT 50
 )
 SELECT 
+    pipeline_run_id,
     pipeline_name,
     environment,
     status,
+    status_desc,
     cloudwatch_url,
     total_processed_count,
     start_dt,
@@ -222,7 +249,7 @@ ORDER BY priority_order, start_dt DESC;
 
     if not recent_runs.empty:
         st.dataframe(
-            recent_runs,
+            recent_runs.drop(columns=["status_desc"]),
             use_container_width=True,
             column_config={
                 "cloudwatch_url": st.column_config.LinkColumn(
@@ -233,5 +260,28 @@ ORDER BY priority_order, start_dt DESC;
             },
             hide_index=True
         )
+
+        # Action section: show delete buttons ONLY for running/progress/active statuses
+        st.markdown("### 🧹 Manage Running Runs")
+        running_mask = recent_runs['status_desc'].str.upper().str.contains('RUNNING|PROGRESS|ACTIVE', regex=True, na=False)
+        running_rows = recent_runs[running_mask]
+
+        if running_rows.empty:
+            st.caption("No runs are currently in a running/active state.")
+        else:
+            for _, row in running_rows.iterrows():
+                with st.container(border=True):
+                    left, mid, right = st.columns([3, 3, 2])
+                    with left:
+                        st.write(f"**{row['pipeline_name']}** · {row['environment']}")
+                        st.write(f"Run ID: `{row['pipeline_run_id']}` · Status: {row['status_desc']}")
+                    with mid:
+                        if row.get('cloudwatch_url'):
+                            st.link_button(f"View Logs: {row['pipeline_run_id']}", row['cloudwatch_url'])
+                    with right:
+                        if st.button("🗑️ Delete Run", key=f"del_{row['pipeline_run_id']}"):
+                            if _delete_single_run(int(row['pipeline_run_id'])):
+                                st.success(f"Deleted run {row['pipeline_run_id']}.")
+                                st.rerun()
     else:
         st.info("No recent pipeline runs found.")
