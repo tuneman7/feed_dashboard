@@ -7,7 +7,7 @@ echo "======================================="
 echo "Checking Ubuntu EC2 Instance Readiness"
 echo "======================================="
 
-PUBLIC_IP="54.210.36.84"
+PUBLIC_IP="100.26.205.30"
 
 if [ ! -f "id_rsa" ]; then
     echo "❌ Private key file 'id_rsa' not found"

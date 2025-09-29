@@ -8,7 +8,7 @@ echo "Connecting to Ubuntu EC2 Instance"
 echo "==============================="
 echo
 
-PUBLIC_IP="54.210.36.84"
+PUBLIC_IP="100.26.205.30"
 
 echo "🔗 Connecting to: ubuntu@$PUBLIC_IP"
 echo "🔑 Using private key: id_rsa"

@@ -6,3 +6,4 @@
  . terraform-build.sh 
  . fix-rds-security.sh 
  . deploy.sh
+ . check_url.sh
