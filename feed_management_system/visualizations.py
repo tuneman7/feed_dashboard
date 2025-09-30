@@ -10,14 +10,8 @@ import pandas as pd
 import numpy as np
 from database_utils import execute_query
 
-def visualizations_page():
-    """Visualizations and analytics dashboard"""
-    st.header("📈 Pipeline Analytics & Visualizations")
-    
-    # Add filters at the top
-    st.subheader("🔍 Filters")
-    
-    # Get available pipelines and environments for filters
+def get_filter_options():
+    """Get available pipelines and environments for filters"""
     pipelines_data = execute_query("""
         SELECT DISTINCT f.pipeline_name, f.pipeline_type_cd
         FROM pipeline.pipeline f
@@ -35,31 +29,10 @@ def visualizations_page():
         ORDER BY env_sc.common_cd;
     """)
     
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if not pipelines_data.empty:
-            selected_pipelines = st.multiselect(
-                "Select Pipelines (leave empty for all)",
-                options=pipelines_data['pipeline_name'].tolist(),
-                default=[]
-            )
-        else:
-            selected_pipelines = []
-            st.info("No pipelines available for selection")
-    
-    with col2:
-        if not environments_data.empty:
-            selected_environments = st.multiselect(
-                "Select Environments (leave empty for all)",
-                options=environments_data['environment'].tolist(),
-                default=[]
-            )
-        else:
-            selected_environments = []
-            st.info("No environments available for selection")
-    
-    # Build filter conditions for SQL queries
+    return pipelines_data, environments_data
+
+def build_filters(selected_pipelines, selected_environments):
+    """Build SQL filter conditions"""
     pipeline_filter = ""
     env_filter = ""
     
@@ -71,8 +44,55 @@ def visualizations_page():
         env_names_str = "', '".join(selected_environments)
         env_filter = f" AND env_sc.common_cd IN ('{env_names_str}')"
     
+    return pipeline_filter, env_filter
+
+def create_section_filters(pipelines_data, environments_data, section_key):
+    """Create filter widgets for a section"""
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if not pipelines_data.empty:
+            selected_pipelines = st.multiselect(
+                "Select Pipelines (leave empty for all)",
+                options=pipelines_data['pipeline_name'].tolist(),
+                default=[],
+                key=f"pipelines_{section_key}"
+            )
+        else:
+            selected_pipelines = []
+            st.info("No pipelines available for selection")
+    
+    with col2:
+        if not environments_data.empty:
+            selected_environments = st.multiselect(
+                "Select Environments (leave empty for all)",
+                options=environments_data['environment'].tolist(),
+                default=[],
+                key=f"environments_{section_key}"
+            )
+        else:
+            selected_environments = []
+            st.info("No environments available for selection")
+    
+    return selected_pipelines, selected_environments
+
+def visualizations_page():
+    """Visualizations and analytics dashboard"""
+    st.header("📈 Pipeline Analytics & Visualizations")
+    
+    # Get filter options once for reuse
+    pipelines_data, environments_data = get_filter_options()
+    
     # Pipeline Performance Overview
     st.subheader("📊 Pipeline Performance Overview")
+    
+    # Section-specific filters
+    with st.expander("🔍 Filters for Performance Overview", expanded=False):
+        selected_pipelines_perf, selected_environments_perf = create_section_filters(
+            pipelines_data, environments_data, "performance"
+        )
+    
+    pipeline_filter_perf, env_filter_perf = build_filters(selected_pipelines_perf, selected_environments_perf)
     
     col1, col2 = st.columns(2)
     
@@ -93,8 +113,8 @@ def visualizations_page():
             JOIN admin.system_codes env_sc ON pe.env_system_cd = env_sc.code_id
             WHERE fr.start_dt >= CURRENT_DATE - INTERVAL '30 days'
                 AND fr.status_cd IN ('COMPLETED', 'FAILED')
-                {pipeline_filter}
-                {env_filter}
+                {pipeline_filter_perf}
+                {env_filter_perf}
             GROUP BY f.pipeline_type_cd
             ORDER BY success_rate DESC;
         """)
@@ -122,8 +142,8 @@ def visualizations_page():
             JOIN pipeline.pipeline_environment pe ON fr.environment_id = pe.environment_id
             JOIN admin.system_codes env_sc ON pe.env_system_cd = env_sc.code_id
             WHERE fr.start_dt >= CURRENT_DATE - INTERVAL '30 days'
-                {pipeline_filter}
-                {env_filter}
+                {pipeline_filter_perf}
+                {env_filter_perf}
             GROUP BY env_sc.common_cd
             ORDER BY run_count DESC;
         """)
@@ -142,6 +162,14 @@ def visualizations_page():
     # Time Series Analysis
     st.subheader("📈 Time Series Analysis")
     
+    # Section-specific filters
+    with st.expander("🔍 Filters for Time Series Analysis", expanded=False):
+        selected_pipelines_ts, selected_environments_ts = create_section_filters(
+            pipelines_data, environments_data, "timeseries"
+        )
+    
+    pipeline_filter_ts, env_filter_ts = build_filters(selected_pipelines_ts, selected_environments_ts)
+    
     # Daily pipeline runs trend by environment
     daily_runs = execute_query(f"""
         SELECT 
@@ -155,8 +183,8 @@ def visualizations_page():
         JOIN pipeline.pipeline_environment pe ON fr.environment_id = pe.environment_id
         JOIN admin.system_codes env_sc ON pe.env_system_cd = env_sc.code_id
         WHERE fr.start_dt >= CURRENT_DATE - INTERVAL '30 days'
-            {pipeline_filter}
-            {env_filter}
+            {pipeline_filter_ts}
+            {env_filter_ts}
         GROUP BY DATE(fr.start_dt), env_sc.common_cd
         ORDER BY run_date, environment;
     """)
@@ -243,6 +271,14 @@ def visualizations_page():
     # Pipeline Execution Duration Analysis
     st.subheader("⏱️ Pipeline Execution Duration Analysis")
 
+    # Section-specific filters
+    with st.expander("🔍 Filters for Duration Analysis", expanded=False):
+        selected_pipelines_dur, selected_environments_dur = create_section_filters(
+            pipelines_data, environments_data, "duration"
+        )
+    
+    pipeline_filter_dur, env_filter_dur = build_filters(selected_pipelines_dur, selected_environments_dur)
+
     duration_data = execute_query(f"""
         SELECT 
             f.pipeline_name,
@@ -255,8 +291,8 @@ def visualizations_page():
         WHERE fr.start_dt >= CURRENT_DATE - INTERVAL '30 days'
             AND fr.end_dt IS NOT NULL
             AND fr.status_cd = 'COMPLETED'
-            {pipeline_filter}
-            {env_filter}
+            {pipeline_filter_dur}
+            {env_filter_dur}
         ORDER BY duration_minutes DESC;
     """)
 
@@ -305,6 +341,14 @@ def visualizations_page():
     # Processing Volume Analysis
     st.subheader("📊 Processing Volume Analysis")
 
+    # Section-specific filters
+    with st.expander("🔍 Filters for Processing Volume Analysis", expanded=False):
+        selected_pipelines_vol, selected_environments_vol = create_section_filters(
+            pipelines_data, environments_data, "volume"
+        )
+    
+    pipeline_filter_vol, env_filter_vol = build_filters(selected_pipelines_vol, selected_environments_vol)
+
     volume_data = execute_query(f"""
         SELECT 
             f.pipeline_name,
@@ -322,8 +366,8 @@ def visualizations_page():
             AND sc.code_type_cd = 'PIPELINE_RUN_DETAIL_TYPE'
             AND fr.start_dt >= CURRENT_DATE - INTERVAL '30 days'
             AND prd.detail_data ~ '^[0-9,]+$'  -- Only numeric values
-            {pipeline_filter}
-            {env_filter}
+            {pipeline_filter_vol}
+            {env_filter_vol}
         ORDER BY run_date DESC;
     """)
 
@@ -417,6 +461,14 @@ def visualizations_page():
     # Time Series by Pipeline
     st.subheader("📈 Records Processed by Pipeline (Time Series)")
 
+    # Section-specific filters
+    with st.expander("🔍 Filters for Pipeline Time Series", expanded=False):
+        selected_pipelines_pts, selected_environments_pts = create_section_filters(
+            pipelines_data, environments_data, "pipeline_timeseries"
+        )
+    
+    pipeline_filter_pts, env_filter_pts = build_filters(selected_pipelines_pts, selected_environments_pts)
+
     pipeline_timeseries_data = execute_query(f"""
         SELECT 
             f.pipeline_name,
@@ -434,8 +486,8 @@ def visualizations_page():
             AND fr.start_dt >= CURRENT_DATE - INTERVAL '30 days'
             AND prd.detail_data ~ '^[0-9,]+$'  -- Only numeric values
             AND fr.status_cd = 'COMPLETED'  -- Only successful runs
-            {pipeline_filter}
-            {env_filter}
+            {pipeline_filter_pts}
+            {env_filter_pts}
         ORDER BY f.pipeline_name, run_date;
     """)
 
@@ -535,6 +587,14 @@ def visualizations_page():
     # Raw Data Tables
     st.subheader("📋 Raw Data")
     
+    # Section-specific filters
+    with st.expander("🔍 Filters for Raw Data Tables", expanded=False):
+        selected_pipelines_raw, selected_environments_raw = create_section_filters(
+            pipelines_data, environments_data, "rawdata"
+        )
+    
+    pipeline_filter_raw, env_filter_raw = build_filters(selected_pipelines_raw, selected_environments_raw)
+    
     tab1, tab2, tab3 = st.tabs(["Recent Runs Summary", "Failure Analysis", "Performance Metrics"])
     
     with tab1:
@@ -556,8 +616,8 @@ def visualizations_page():
             JOIN pipeline.pipeline_environment pe ON fr.environment_id = pe.environment_id
             JOIN admin.system_codes env_sc ON pe.env_system_cd = env_sc.code_id
             WHERE fr.start_dt >= CURRENT_DATE - INTERVAL '7 days'
-                {pipeline_filter}
-                {env_filter}
+                {pipeline_filter_raw}
+                {env_filter_raw}
             ORDER BY fr.start_dt DESC
             LIMIT 50;
         """)
@@ -582,8 +642,8 @@ def visualizations_page():
             JOIN admin.system_codes env_sc ON pe.env_system_cd = env_sc.code_id
             WHERE fr.status_cd = 'FAILED'
                 AND fr.start_dt >= CURRENT_DATE - INTERVAL '30 days'
-                {pipeline_filter}
-                {env_filter}
+                {pipeline_filter_raw}
+                {env_filter_raw}
             ORDER BY fr.start_dt DESC
             LIMIT 50;
         """)
@@ -637,8 +697,8 @@ def visualizations_page():
             JOIN pipeline.pipeline_environment pe ON fr.environment_id = pe.environment_id
             JOIN admin.system_codes env_sc ON pe.env_system_cd = env_sc.code_id
             WHERE fr.start_dt >= CURRENT_DATE - INTERVAL '30 days'
-                {pipeline_filter}
-                {env_filter}
+                {pipeline_filter_raw}
+                {env_filter_raw}
             GROUP BY f.pipeline_id, f.pipeline_name, f.pipeline_type_cd
             ORDER BY total_runs DESC;
         """)
