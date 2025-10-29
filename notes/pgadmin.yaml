@@ -1,0 +1,33 @@
+=== pgAdmin Setup Complete ===
+
+ Access pgAdmin at: http://98.92.12.182:5050
+ Login with:
+   Email   : admin@example.com
+   Password: admin
+
+ To connect to your RDS database in pgAdmin:
+   1. Click 'Add New Server'
+   2. General tab:
+      Name: RDS PostgreSQL
+   3. Connection tab:
+      Host: dst-dashboard-database-fast.ckqboenmhdca.us-east-1.rds.amazonaws.com
+      Port: 5432
+      Database: pipeline_management
+      Username: postgres
+      Password: Dashboard2025!$
+
+ Notes:
+   - Make sure your RDS security group allows connections from this EC2
+   - Access pgAdmin from your local browser using the URL above
+   - Port 5050 should be open in your EC2 security group
+
+ Troubleshooting:
+   - View logs: docker logs pgadmin4
+   - Restart: docker restart pgadmin4
+   - Stop: docker stop pgadmin4 && docker rm pgadmin4
+   - Container status: docker ps -a | grep pgadmin4
+ubuntu@ip-10-217-2-55:~/app/pgadmin$ exit
+logout
+Connection to 98.92.12.182 closed.
+
+, 

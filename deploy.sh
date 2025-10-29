@@ -197,6 +197,8 @@ rm -rf "$TEMP_DIR"
 echo "📊 Deployment summary:"
 ssh -i id_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$PUBLIC_IP 'echo "Files in ~/app:"; ls -la ~/app/ 2>/dev/null | wc -l | xargs echo "Total files/dirs:" || echo "Directory empty or not accessible"'
 
+
+
 echo
 echo "🔌 Connecting to server and changing to app directory..."
 echo "   You are now in the ~/app directory on the remote server"
@@ -219,3 +221,37 @@ if [ $? -ne 0 ]; then
     echo "   Files were deployed successfully, but connection failed"
     echo "   Try running ./connect.sh manually"
 fi
+
+###############################################################################
+# Install/Update cron to run the alert processor every 3 minutes
+###############################################################################
+echo
+echo "⏲️  Installing/Updating cron job for alert processor..."
+
+ssh -i id_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$PUBLIC_IP <<'REMOTE'
+set -euo pipefail
+
+APP_DIR="$HOME/app/feed_management_system"
+RUN_SCRIPT="$APP_DIR/run_processor.sh"
+LOG_DIR="$APP_DIR/logs"
+CRON_MARK="# ALERT_PROCESSOR_CRON"
+
+# Ensure logs directory exists and is writable by the ubuntu user
+mkdir -p "$LOG_DIR"
+chmod 777 "$LOG_DIR"
+
+# Ensure the processor script is executable
+chmod +x "$RUN_SCRIPT" || true
+
+# Run every 3 minutes
+CRON_LINE="*/3 * * * * cd $APP_DIR && /bin/bash $RUN_SCRIPT >> $LOG_DIR/alert_processor.log 2>&1 $CRON_MARK"
+
+# Safely update crontab (tolerates missing crontab)
+{ crontab -l 2>/dev/null || true; } | grep -vF "$CRON_MARK" | crontab - || true
+( crontab -l 2>/dev/null || true; echo "$CRON_LINE" ) | crontab -
+
+echo "✅ Cron installed/updated."
+echo "Current crontab tail:"
+crontab -l | tail -n 5 || true
+REMOTE
+

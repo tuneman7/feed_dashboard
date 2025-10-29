@@ -24,6 +24,8 @@ from dashboard import dashboard
 from visualizations import visualizations_page
 from user_management import user_management_page
 from database_utils import init_connection, DB_CONFIG
+from alert_management import alert_management_page
+
 
 # Force cache clear at startup
 os.environ["CACHE_BUSTER"] = str(uuid.uuid4())
@@ -58,7 +60,8 @@ def main():
     st.caption(f"Welcome back, {user['name']} ({user['role'].title()})")
     
     # All available pages
-    all_pages = ["Dashboard", "Database Setup", "System Codes", "Pipeline Management", "Visualizations", "User Management", "My Profile"]
+    all_pages = ["Dashboard", "Database Setup", "System Codes", "Pipeline Management",
+             "Alert Management", "Visualizations", "User Management", "My Profile"]
     
     # Filter pages based on user permissions
     available_pages = filter_navigation_options(all_pages[:-2])  # Exclude User Management and My Profile from filtering
@@ -121,6 +124,8 @@ def main():
             visualizations_page()
         elif page == "User Management":
             user_management_page()
+        elif page == "Alert Management" and check_permission("Alert Management"):
+            alert_management_page()
         elif page == "My Profile":
             from rds_auth import show_profile_page
             show_profile_page()

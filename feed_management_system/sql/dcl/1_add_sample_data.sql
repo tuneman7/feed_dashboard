@@ -50,3 +50,63 @@ INSERT INTO admin.system_codes (common_cd, code_type_cd, code_description, sort_
 
 
 ON CONFLICT (common_cd, code_type_cd) DO NOTHING;
+
+
+-- ============================================================================
+-- ALERT SYSTEM DATA MODEL EXTENSION
+-- ============================================================================
+-- This extends the existing pipeline schema to support comprehensive alerting
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 1. Add new code types for alerts
+-- ----------------------------------------------------------------------------
+INSERT INTO admin.code_type (code_type_cd, code_type_description) VALUES
+    ('ALERT_TYPE', 'Types of alerts that can be defined'),
+    ('ALERT_SEVERITY', 'Severity levels for alerts'),
+    ('ALERT_STATUS', 'Current status of alert instances'),
+    ('ALERT_NOTIFICATION_TYPE', 'Types of notification channels for alerts'),
+    ('CADENCE_TYPE', 'Types of cadence definitions (historical vs fixed)'),
+    ('TIME_UNIT', 'Time units for cadence and thresholds')
+ON CONFLICT (code_type_cd) DO NOTHING;
+
+-- ----------------------------------------------------------------------------
+-- 2. Add system codes for alert types
+-- ----------------------------------------------------------------------------
+INSERT INTO admin.system_codes (common_cd, code_type_cd, code_description, sort_order) VALUES
+    -- ALERT_TYPE
+    ('COMPLETION_ALERT', 'ALERT_TYPE', 'Pipeline execution cadence monitoring', 1),
+    ('CADENCE_ALERT', 'ALERT_TYPE', 'Pipeline execution cadence monitoring', 2),
+    ('DATA_THRESHOLD', 'ALERT_TYPE', 'Data volume/quality threshold monitoring', 3),
+    ('HARD_FAILURE', 'ALERT_TYPE', 'Pipeline execution failure detection', 4),
+    ('PROCESSING_TIME', 'ALERT_TYPE', 'Pipeline runtime duration monitoring', 5),
+
+    -- ALERT_SEVERITY
+    ('CRITICAL', 'ALERT_SEVERITY', 'Critical - immediate action required', 1),
+    ('HIGH', 'ALERT_SEVERITY', 'High - urgent attention needed', 2),
+    ('MEDIUM', 'ALERT_SEVERITY', 'Medium - investigate soon', 3),
+    ('LOW', 'ALERT_SEVERITY', 'Low - informational', 4),
+
+    -- ALERT_STATUS
+    ('ACTIVE', 'ALERT_STATUS', 'Alert is currently active/triggered', 1),
+    ('ACKNOWLEDGED', 'ALERT_STATUS', 'Alert has been acknowledged', 2),
+    ('RESOLVED', 'ALERT_STATUS', 'Alert condition resolved', 3),
+    ('SUPPRESSED', 'ALERT_STATUS', 'Alert temporarily suppressed', 4),
+    ('CLOSED', 'ALERT_STATUS', 'Alert closed/archived', 5),
+
+    -- ALERT_NOTIFICATION_TYPE
+    ('EMAIL', 'ALERT_NOTIFICATION_TYPE', 'Email notification', 1),
+    ('SLACK', 'ALERT_NOTIFICATION_TYPE', 'Slack channel notification', 2),
+
+    -- CADENCE_TYPE
+    ('HISTORICAL', 'CADENCE_TYPE', 'Based on historical run patterns', 1),
+    ('FIXED_SCHEDULE', 'CADENCE_TYPE', 'Based on fixed schedule', 2),
+    ('CUSTOM_EXPRESSION', 'CADENCE_TYPE', 'Custom cron-like expression', 3),
+
+    -- TIME_UNIT
+    ('MINUTES', 'TIME_UNIT', 'Minutes', 1),
+    ('HOURS', 'TIME_UNIT', 'Hours', 2),
+    ('DAYS', 'TIME_UNIT', 'Days', 3),
+    ('WEEKS', 'TIME_UNIT', 'Weeks', 4),
+    ('MONTHS', 'TIME_UNIT', 'Months', 5)
+ON CONFLICT (common_cd, code_type_cd) DO NOTHING;

@@ -1,3 +1,4 @@
+#!/bin/bash
 # Core Framework
 streamlit>=1.28.0
 fastapi>=0.104.0
@@ -47,3 +48,19 @@ plotly
 pgadmin4
 
 bcrypt>=4.1.2
+
+
+#put in stuff for google mail.
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+google-api-python-client
+
+# Email templating
+Jinja2>=3.1.4
+
+# Jinja dependency (often auto-installed with Jinja2, pinning avoids old-system conflicts)
+MarkupSafe>=2.1.5
+
+# If you plan to generate logos server-side (Pillow used in my demo)
+Pillow>=10.3.0

@@ -1,0 +1,51 @@
+{% if logo_png_b64 %}
+  <div style="margin:0 0 12px 0; padding:0; text-align:left;">
+    <img src="data:image/png;base64,{{ logo_png_b64 }}"
+         alt="Shift4 Data Systems Team"
+         style="display:block; max-width:100%; height:auto; width:600px;">
+  </div>
+{% endif %}
+<div style="font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; line-height:1.5; color:#111;">
+  <h3>✅ Pipeline Completed</h3>
+  <table style="border-collapse:collapse; width:100%; max-width:640px;">
+    <tr>
+      <td style="padding:4px 8px;"><strong>Pipeline</strong></td>
+      <td style="padding:4px 8px;">{{ pipeline_name }}</td>
+    </tr>
+    <tr>
+      <td style="padding:4px 8px;"><strong>Environment</strong></td>
+      <td style="padding:4px 8px;">{{ environment_cd }} — {{ environment_desc }}</td>
+    </tr>
+    <tr>
+      <td style="padding:4px 8px;"><strong>Run ID</strong></td>
+      <td style="padding:4px 8px;">{{ pipeline_run_id }}</td>
+    </tr>
+    <tr>
+      <td style="padding:4px 8px;"><strong>Started</strong></td>
+      <td style="padding:4px 8px;">{{ start_dt|fmt_dt }}</td>
+    </tr>
+    <tr>
+      <td style="padding:4px 8px;"><strong>Ended</strong></td>
+      <td style="padding:4px 8px;">{{ end_dt|fmt_dt }}</td>
+    </tr>
+    <tr>
+      <td style="padding:4px 8px;"><strong>Duration</strong></td>
+      <td style="padding:4px 8px;">{{ duration_minutes }} minute(s)</td>
+    </tr>
+    <tr>
+      <td style="padding:4px 8px;"><strong>Run Time</strong></td>
+      <td style="padding:4px 8px;">{{ duration_seconds|hms }}</td>
+    </tr>
+    {% if total_processed_count is not none %}
+    <tr>
+      <td style="padding:4px 8px;"><strong>Total Rows Processed</strong></td>
+      <td style="padding:4px 8px;">{{ total_processed_count|comma }}</td>
+    </tr>
+    {% endif %}
+  </table>
+  <p><strong>Alert:</strong> {{ alert_name }}</p>
+  {% if alert_description %}
+  <p style="white-space:pre-line">{{ alert_description }}</p>
+  {% endif %}
+  <p style="margin-top:16px; color:#555;">This is an automated notification.</p>
+</div>

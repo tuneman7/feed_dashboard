@@ -76,6 +76,8 @@ kill_streamlit() {
 # Prompt DB config & always export fresh
 select_database
 
+kill_streamlit
+
 # Start Streamlit and tail log
 start_streamlit
 

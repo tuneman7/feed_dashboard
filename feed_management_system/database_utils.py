@@ -2,11 +2,12 @@
 """
 Database utilities and connection management
 """
-import streamlit as st
+import os
 import pandas as pd
 import psycopg2
 from psycopg2.extras import RealDictCursor
-import os
+from psycopg2 import sql, OperationalError
+import streamlit as st
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -14,72 +15,121 @@ load_dotenv()
 
 # Database configuration
 DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'localhost'),
-    'port': os.getenv('DB_PORT', '5432'),
-    'database': os.getenv('DB_NAME', 'pipeline_management'),
-    'user': os.getenv('DB_USER', os.getenv('USER')),
-    'password': os.getenv('DB_PASSWORD', '')
+    "host": os.getenv("DB_HOST", "localhost"),
+    "port": os.getenv("DB_PORT", "5432"),
+    "database": os.getenv("DB_NAME", "pipeline_management"),
+    "user": os.getenv("DB_USER", os.getenv("USER")),
+    "password": os.getenv("DB_PASSWORD", ""),
 }
 
 def create_db_if_missing():
-    """Create the target database if it does not exist"""
-    from psycopg2 import sql, OperationalError
-
+    """Create the target database if it does not exist."""
     try:
-        # Try connecting to the target database
         psycopg2.connect(**DB_CONFIG).close()
-        return  # Database exists
+        return  # DB exists
     except OperationalError as e:
         if f'database "{DB_CONFIG["database"]}" does not exist' not in str(e):
-            raise e  # Rethrow any error other than 'does not exist'
+            raise
 
-    # Attempt to connect to 'postgres' DB to create the target DB
+    # Connect to 'postgres' to create the target DB
+    fallback = dict(DB_CONFIG)
+    fallback["database"] = "postgres"
     try:
-        fallback_config = DB_CONFIG.copy()
-        fallback_config["database"] = "postgres"
-
-        conn = psycopg2.connect(**fallback_config)
+        conn = psycopg2.connect(**fallback)
         conn.autocommit = True
-
         with conn.cursor() as cur:
             cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(DB_CONFIG["database"])))
         conn.close()
-
         print(f"✅ Created missing database '{DB_CONFIG['database']}'.")
-
     except Exception as ex:
         raise RuntimeError(f"❌ Failed to create database '{DB_CONFIG['database']}': {ex}")
 
-# Initialize database
+# Initialize database (ensure DB exists)
 create_db_if_missing()
 
 @st.cache_resource(hash_funcs={"builtins.str": lambda _: os.getenv("CACHE_BUSTER", "")})
 def init_connection():
-    """Initialize database connection with caching"""
+    """Initialize database connection with caching (not used by execute_query)."""
     try:
-        conn = psycopg2.connect(**DB_CONFIG)
-        return conn
+        return psycopg2.connect(**DB_CONFIG)
     except Exception as e:
         st.error(f"Database connection failed: {e}")
         return None
 
-def execute_query(query, params=None, fetch=True):
-    """Execute database query with error handling"""
+def _should_commit_from_status(status: str) -> bool:
+    """
+    Decide whether to commit based on cursor.statusmessage.
+    Examples:
+      'INSERT 0 1', 'UPDATE 3', 'DELETE 1', 'CREATE TABLE', 'ALTER TABLE', 'DROP TABLE'
+      'SELECT 1' (no commit)
+    """
+    if not status:
+        return False
+    verb = status.split()[0].upper()
+    # Treat non-SELECT as write; SELECT/SHOW/EXPLAIN/VALUES are read-only
+    return verb not in {"SELECT", "SHOW", "EXPLAIN", "VALUES"}
+
+def execute_query(query: str, params=None, fetch: bool = True, commit: bool | None = None):
+    """
+    Execute a SQL statement with robust commit behavior.
+
+    - If commit is True -> always commit after execute (even when fetch=True).
+    - If commit is False -> never commit here (caller manages).
+    - If commit is None (default) -> infer from cursor.statusmessage:
+        * commit for INSERT/UPDATE/DELETE/DDL, even with RETURNING
+        * don't commit for SELECT/SHOW/EXPLAIN/VALUES
+
+    Returns:
+      - DataFrame for fetch=True
+      - True/False for fetch=False (success flag)
+    """
     if not query or query.strip() == "":
-        return True  # Skip empty query safely
+        return True
+
+    conn = None
+    cur = None
     try:
-        # Create a fresh connection for each query to avoid transaction issues
         conn = psycopg2.connect(**DB_CONFIG)
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(query, params)
-            if fetch:
-                result = cur.fetchall()
-                conn.close()
-                return pd.DataFrame(result) if result else pd.DataFrame()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(query, params)
+
+        # Decide on commit if not explicitly specified
+        if commit is None:
+            commit = _should_commit_from_status(getattr(cur, "statusmessage", "") or "")
+
+        result_df = pd.DataFrame()
+        if fetch:
+            # If the statement produced a result set (e.g., SELECT or INSERT ... RETURNING)
+            if cur.description is not None:
+                rows = cur.fetchall()
+                result_df = pd.DataFrame(rows) if rows else pd.DataFrame()
             else:
-                conn.commit()
-                conn.close()
-                return True
+                # No rows produced (e.g., DDL with fetch=True) – return empty DF
+                result_df = pd.DataFrame()
+
+        if commit:
+            conn.commit()
+
+        return result_df if fetch else True
+
     except Exception as e:
+        # Roll back any partial transaction
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         st.error(f"Query execution failed: {e}")
         return pd.DataFrame() if fetch else False
+
+    finally:
+        if cur:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass

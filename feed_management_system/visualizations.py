@@ -190,78 +190,76 @@ def visualizations_page():
     """)
     
     if not daily_runs.empty:
-        # Create tabs for different views
-        tab1, tab2, tab3 = st.tabs(["Total Runs", "Successful Runs", "Failed Runs"])
-        
-        # Get color palette for environments
-        colors = px.colors.qualitative.Set1 + px.colors.qualitative.Set2
-        unique_environments = daily_runs['environment'].unique()
-        
-        with tab1:
+            # Add day of week column
+            daily_runs['run_date'] = pd.to_datetime(daily_runs['run_date'])
+            daily_runs['day_of_week'] = daily_runs['run_date'].dt.day_name()
+            
+            # Get color palette for environments
+            colors = px.colors.qualitative.Set1 + px.colors.qualitative.Set2
+            unique_environments = daily_runs['environment'].unique()
+            
+            # Create single chart with all metrics
             fig = go.Figure()
             
+            # Add traces for each environment and metric type
             for i, env in enumerate(unique_environments):
                 env_data = daily_runs[daily_runs['environment'] == env]
+                base_color = colors[i % len(colors)]
                 
+                # Total runs - solid line
                 fig.add_trace(go.Scatter(
                     x=env_data['run_date'],
                     y=env_data['total_runs'],
                     mode='lines+markers',
-                    name=env,
-                    line=dict(color=colors[i % len(colors)])
+                    name=f'{env} - Total',
+                    line=dict(color=base_color, width=2),
+                    legendgroup=env,
+                    legendgrouptitle_text=env,
+                    customdata=env_data['day_of_week'],
+                    hovertemplate='<b>%{fullData.name}</b><br>' +
+                                'Date: %{x}<br>' +
+                                'Day: %{customdata}<br>' +
+                                'Runs: %{y}<extra></extra>'
                 ))
-            
-            fig.update_layout(
-                title='Daily Total Pipeline Runs by Environment (30 Days)',
-                xaxis_title='Date',
-                yaxis_title='Number of Runs',
-                hovermode='x unified'
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with tab2:
-            fig = go.Figure()
-            
-            for i, env in enumerate(unique_environments):
-                env_data = daily_runs[daily_runs['environment'] == env]
                 
+                # Successful runs - dashed line
                 fig.add_trace(go.Scatter(
                     x=env_data['run_date'],
                     y=env_data['successful_runs'],
                     mode='lines+markers',
-                    name=env,
-                    line=dict(color=colors[i % len(colors)])
+                    name=f'{env} - Successful',
+                    line=dict(color=base_color, width=2, dash='dash'),
+                    legendgroup=env,
+                    customdata=env_data['day_of_week'],
+                    hovertemplate='<b>%{fullData.name}</b><br>' +
+                                'Date: %{x}<br>' +
+                                'Day: %{customdata}<br>' +
+                                'Runs: %{y}<extra></extra>'
                 ))
-            
-            fig.update_layout(
-                title='Daily Successful Pipeline Runs by Environment (30 Days)',
-                xaxis_title='Date',
-                yaxis_title='Number of Successful Runs',
-                hovermode='x unified'
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with tab3:
-            fig = go.Figure()
-            
-            for i, env in enumerate(unique_environments):
-                env_data = daily_runs[daily_runs['environment'] == env]
                 
+                # Failed runs - dotted line
                 fig.add_trace(go.Scatter(
                     x=env_data['run_date'],
                     y=env_data['failed_runs'],
                     mode='lines+markers',
-                    name=env,
-                    line=dict(color=colors[i % len(colors)])
+                    name=f'{env} - Failed',
+                    line=dict(color=base_color, width=2, dash='dot'),
+                    legendgroup=env,
+                    customdata=env_data['day_of_week'],
+                    hovertemplate='<b>%{fullData.name}</b><br>' +
+                                'Date: %{x}<br>' +
+                                'Day: %{customdata}<br>' +
+                                'Runs: %{y}<extra></extra>'
                 ))
             
             fig.update_layout(
-                title='Daily Failed Pipeline Runs by Environment (30 Days)',
+                title='Daily Pipeline Runs by Environment and Status (30 Days)',
                 xaxis_title='Date',
-                yaxis_title='Number of Failed Runs',
-                hovermode='x unified'
+                yaxis_title='Number of Runs',
+                hovermode='x unified',
+                legend=dict(
+                    groupclick="toggleitem"
+                )
             )
             
             st.plotly_chart(fig, use_container_width=True)
