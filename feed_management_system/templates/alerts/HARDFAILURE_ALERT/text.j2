@@ -1,0 +1,24 @@
+Shift4 Data Systems Team — PIPELINE OBSERVABILITY AND ALERTS SYSTEM
+
+ALERT: Hard Failure
+Pipeline: {{ pipeline_name }}
+Environment: {{ environment_cd }} ({{ environment_desc }})
+Run ID: {{ pipeline_run_id }}
+Start: {{ start_dt | fmt_dt }}
+End:   {{ end_dt | fmt_dt }}
+Duration: {{ duration_minutes }} minute(s)
+
+{% if total_processed_count is not none -%}
+Total Rows Processed (partial/failed): {{ total_processed_count | comma }}
+{%- endif %}
+
+{% if cloudwatch_log_url -%}
+CloudWatch Logs: {{ cloudwatch_log_url }}
+{%- endif %}
+
+Action Taken: Data Systems Team notified and pager duty alert tracking triggered.
+
+Alert Name: {{ alert_name }}
+Description: {{ alert_description or "-" }}
+
+This is an automated notification.

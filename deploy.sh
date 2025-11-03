@@ -243,8 +243,8 @@ chmod 777 "$LOG_DIR"
 # Ensure the processor script is executable
 chmod +x "$RUN_SCRIPT" || true
 
-# Run every 3 minutes
-CRON_LINE="*/3 * * * * cd $APP_DIR && /bin/bash $RUN_SCRIPT >> $LOG_DIR/alert_processor.log 2>&1 $CRON_MARK"
+# Run every 2 minutes
+CRON_LINE="*/2 * * * * cd $APP_DIR && /bin/bash $RUN_SCRIPT >> $LOG_DIR/alert_processor.log 2>&1 $CRON_MARK"
 
 # Safely update crontab (tolerates missing crontab)
 { crontab -l 2>/dev/null || true; } | grep -vF "$CRON_MARK" | crontab - || true

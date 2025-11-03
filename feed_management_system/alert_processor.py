@@ -14,20 +14,21 @@ from datetime import datetime
 from pathlib import Path
 import os
 import json
+# add at top with the other MIME imports
+from email.mime.image import MIMEImage
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
 
 import pandas as pd
 from jinja2 import Environment, FileSystemLoader, TemplateNotFound
 
-from database_utils import execute_query
+from database_utils_standalone import execute_query
 from email_sender import GmailSender
-
 
 from pathlib import Path
 import base64
 
-def _templates_dir() -> Path:
-    # alerts/ lives at templates/alerts, so images live at templates/images
-    return Path(__file__).resolve().parent / "templates"
 
 def load_shift4_logo_base64(filename: str = "shift4_data_systems_team.png") -> str:
     """
@@ -44,6 +45,21 @@ def load_shift4_logo_base64(filename: str = "shift4_data_systems_team.png") -> s
     except Exception as ex:
         print(f"Error reading Shift4 logo at {logo_path}: {ex}")
         return ""
+
+
+def _templates_dir() -> Path:
+    return Path(__file__).resolve().parent / "templates"
+
+def load_shift4_logo_bytes(filename: str = "shift4_data_systems_team.png") -> bytes | None:
+    p = _templates_dir() / "images" / filename
+    try:
+        if not p.exists():
+            print(f"Shift4 logo not found at {p}; skipping logo embedding")
+            return None
+        return p.read_bytes()
+    except Exception as ex:
+        print(f"Error reading Shift4 logo at {p}: {ex}")
+        return None
 
 
 
@@ -412,7 +428,8 @@ def process_completion_alerts(lookback_minutes: int = LOOKBACK_MINUTES) -> int:
             }
 
 
-            context["logo_png_b64"] = load_shift4_logo_base64()  # looks for templates/images/shift4_data_systems_team.png
+            logo_bytes = load_shift4_logo_bytes()
+            inline_images = {"shift4logo": logo_bytes} if logo_bytes else None
 
 
             # Render subject/text/html via external templates (fallback-safe)
@@ -477,7 +494,9 @@ def process_completion_alerts(lookback_minutes: int = LOOKBACK_MINUTES) -> int:
                     subject=subject,
                     text_body=text_body,
                     html_body=html_body,
+                    inline_images=inline_images,  # NEW
                 )
+
                 execute_query(
                     """
                     UPDATE pipeline.alert_instance
@@ -506,11 +525,282 @@ def process_completion_alerts(lookback_minutes: int = LOOKBACK_MINUTES) -> int:
     print(f"Finished process_completion_alerts; created {created} alert_instance row(s)")
     return created
 
+def process_hardfailure_alerts(lookback_minutes: int = LOOKBACK_MINUTES) -> int:
+    """
+    Identical flow to process_completion_alerts, but for hard failures.
+    - Pulls HARDFAILURE_ALERT definitions
+    - Filters to EMAIL-only and requires recipients
+    - Finds FAILED/ERROR/HARD_FAILURE runs in lookback window
+    - Dedupes by (alert_definition_id, pipeline_run_id)
+    - Renders HARDFAILURE_ALERT templates (subject/text/html)
+    - Inserts alert_instance and sends email
+    - Adds CloudWatch log URL using run_detail_type code lookup
+    """
+    print(f"Starting process_hardfailure_alerts with lookback_minutes={lookback_minutes}")
+    created = 0
+
+    # Required system codes (same pattern you already use)
+    hardfailure_type_id   = get_code_id("HARDFAILURE_ALERT", "ALERT_TYPE")
+    active_status_id      = get_code_id("ACTIVE", "ALERT_STATUS")
+    email_type_id         = get_code_id("EMAIL", "ALERT_NOTIFICATION_TYPE")
+    total_count_type_id   = get_code_id("TOTAL_PROCESSED_COUNT", "PIPELINE_RUN_DETAIL_TYPE")
+    cloudwatch_link_type_id = get_code_id("CLOUDWATCH_LOG_LINK", "PIPELINE_RUN_DETAIL_TYPE")
+
+    if hardfailure_type_id is None or active_status_id is None:
+        print("Required system codes missing; exiting without processing (hardfailure)")
+        return 0
+
+    # Load alert definitions for this type (unchanged pattern)
+    alerts_query = f"""
+        SELECT
+          ad.alert_definition_id,
+          ad.pipeline_id,
+          ad.environment_id,
+          ad.alert_name,
+          ad.alert_description,
+          ad.severity_cd,
+          ad.notification_type_cd,
+          ad.recipient_list,
+          p.pipeline_name,
+          sc_env.common_cd        AS environment_cd,
+          sc_env.code_description AS environment_desc,
+          sc_sev.common_cd        AS severity_common_cd,
+          sc_sev.code_description AS severity_desc
+        FROM pipeline.alert_definition ad
+        JOIN pipeline.pipeline p               ON p.pipeline_id = ad.pipeline_id
+        JOIN pipeline.pipeline_environment pe  ON pe.environment_id = ad.environment_id
+        JOIN admin.system_codes sc_env         ON sc_env.code_id  = pe.env_system_cd
+        LEFT JOIN admin.system_codes sc_sev    ON sc_sev.code_id  = ad.severity_cd
+                                             AND sc_sev.code_type_cd = 'ALERT_SEVERITY'
+        WHERE ad.is_enabled = true
+          AND ad.alert_type_cd = {hardfailure_type_id}
+        ORDER BY p.pipeline_name, ad.alert_name;
+    """
+    df_alerts = execute_query(alerts_query, fetch=True)
+    if df_alerts is None or df_alerts.empty:
+        print("No HARDFAILURE_ALERT definitions found; nothing to do")
+        return 0
+
+    print(f"Loaded {len(df_alerts)} HARDFAILURE alert definition(s)")
+
+    for _, a in df_alerts.iterrows():
+        adid = int(a["alert_definition_id"])
+        pipeline_id = int(a["pipeline_id"])
+        environment_id = int(a["environment_id"])
+
+        # --- REQUIRED PARITY: email-only + recipients guard (your existing behavior) ---
+        if email_type_id is not None and int(a["notification_type_cd"]) != email_type_id:
+            print(f"Skipping alert_definition_id={adid} due to non-email notification_type_cd={a['notification_type_cd']}")
+            continue
+
+        recipients = split_email_recipients(a.get("recipient_list", ""))
+        if not recipients:
+            print(f"Skipping alert_definition_id={adid} because recipient list is empty or invalid")
+            continue
+        # -------------------------------------------------------------------------------
+
+        severity_text = a.get("severity_common_cd") or "INFO"
+
+        # Pull failed/error runs in window; join both count and cloudwatch link by type code
+        runs = execute_query(
+            """
+            SELECT
+              pr.pipeline_run_id,
+              pr.start_dt,
+              pr.end_dt,
+              prd_count.detail_data AS total_processed_count,
+              prd_log.detail_data   AS cloudwatch_log_url
+            FROM pipeline.pipeline_run pr
+            LEFT JOIN pipeline.pipeline_run_details prd_count
+              ON prd_count.pipeline_run_id = pr.pipeline_run_id
+             AND prd_count.run_detail_type_cd = %(count_type_id)s
+            LEFT JOIN pipeline.pipeline_run_details prd_log
+              ON prd_log.pipeline_run_id = pr.pipeline_run_id
+             AND prd_log.run_detail_type_cd = %(cw_type_id)s
+            WHERE pr.pipeline_id = %(pid)s
+              AND pr.environment_id = %(eid)s
+              AND pr.status_cd IN ('FAILED','ERROR','HARD_FAILURE')
+              AND pr.status_cd_type = 'STATUS'
+              AND pr.end_dt IS NOT NULL
+              AND pr.end_dt >= (CURRENT_TIMESTAMP - INTERVAL %(mins)s)
+            ORDER BY pr.end_dt DESC;
+            """,
+            {
+                "pid": pipeline_id,
+                "eid": environment_id,
+                "mins": f"'{lookback_minutes} minutes'",
+                "count_type_id": total_count_type_id,
+                "cw_type_id": cloudwatch_link_type_id,
+            },
+            fetch=True,
+        )
+        if runs is None or runs.empty:
+            print("No recent hardfailure runs found")
+            continue
+
+        print(f"Found {len(runs)} hardfailure run(s) within lookback window")
+
+        for _, r in runs.iterrows():
+            run_id = int(r["pipeline_run_id"])
+
+            # De-dupe: skip if we already created an alert for this definition/run pair
+            already = execute_query(
+                """
+                SELECT 1
+                FROM pipeline.alert_instance
+                WHERE alert_definition_id = %(adid)s
+                  AND pipeline_run_id = %(rid)s
+                LIMIT 1;
+                """,
+                {"adid": adid, "rid": run_id},
+                fetch=True,
+            )
+            if already is not None and not already.empty:
+                print(f"Skipping run_id={run_id} for alert_definition_id={adid} because an alert_instance already exists")
+                continue
+
+            start_dt = r["start_dt"]
+            end_dt = r["end_dt"]
+            duration_min = minutes_between(start_dt, end_dt)
+            duration_sec = _duration_seconds(start_dt, end_dt)
+            total_processed_count_raw = r.get("total_processed_count")
+            total_processed_count = _to_int_or_none(total_processed_count_raw)
+            if total_processed_count is None and total_processed_count_raw is not None:
+                print(f"Could not parse total_processed_count='{total_processed_count_raw}' for run_id={run_id}")
+            elif total_processed_count is not None:
+                print(f"Resolved total_processed_count={total_processed_count} for run_id={run_id}")
+
+            cloudwatch_log_url = (r.get("cloudwatch_log_url") or "").strip() or None
+
+            # Email context (keys consistent with your completion templates + new log URL)
+            context = {
+                "severity_text": severity_text,
+                "pipeline_name": a.get("pipeline_name"),
+                "environment_cd": a.get("environment_cd"),
+                "environment_desc": a.get("environment_desc"),
+                "pipeline_run_id": run_id,
+                "start_dt": start_dt,
+                "end_dt": end_dt,
+                "duration_minutes": duration_min,
+                "duration_seconds": duration_sec,
+                "total_processed_count": total_processed_count,
+                "alert_name": a.get("alert_name"),
+                "alert_description": a.get("alert_description"),
+                "cloudwatch_log_url": cloudwatch_log_url,  # NEW for templates
+            }
+
+            logo_bytes = load_shift4_logo_bytes()
+            inline_images = {"shift4logo": logo_bytes} if logo_bytes else None
+
+            # Render HARDFAILURE templates (separate from completion)
+            rendered = render_email_templates("HARDFAILURE_ALERT", context)
+            subject = rendered["subject"]
+            text_body = rendered["text"]
+            html_body = rendered["html"]
+
+            # Insert alert_instance (same structure)
+            alert_message = f"Pipeline hard failure at {end_dt} (duration {duration_min}m)"
+            alert_data = {
+                "type": "HARDFAILURE_ALERT",
+                "pipeline_id": pipeline_id,
+                "environment_id": environment_id,
+                "pipeline_run_id": run_id,
+                "start_dt": str(start_dt),
+                "end_dt": str(end_dt),
+                "duration_minutes": duration_min,
+                "total_processed_count": total_processed_count,
+                "alert_name": a.get("alert_name"),
+                "severity_cd": int(a.get("severity_cd")) if a.get("severity_cd") is not None else None,
+                "cloudwatch_log_url": cloudwatch_log_url,
+            }
+
+            ins = execute_query(
+                """
+                INSERT INTO pipeline.alert_instance
+                  (alert_definition_id, pipeline_run_id,
+                   triggered_at, alert_status_cd,
+                   alert_message, alert_data,
+                   notification_sent, notification_sent_at, notification_channels,
+                   created_at, updated_at)
+                VALUES
+                  (%(adid)s, %(rid)s,
+                   CURRENT_TIMESTAMP, %(status_id)s,
+                   %(msg)s, %(j)s::jsonb,
+                   FALSE, NULL, %(channels)s,
+                   CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                RETURNING alert_instance_id;
+                """,
+                {
+                    "adid": adid,
+                    "rid": run_id,
+                    "status_id": active_status_id,
+                    "msg": alert_message,
+                    "j": json.dumps(alert_data),
+                    "channels": ["email"],
+                },
+                fetch=True,
+            )
+            if ins is None or ins.empty:
+                print("Failed to insert alert_instance (hardfailure)")
+                continue
+
+            alert_instance_id = int(ins.iloc[0]["alert_instance_id"])
+            print(f"Inserted alert_instance_id={alert_instance_id} (hardfailure)")
+
+            mailer = GmailSender()
+
+            # Send email + mark sent
+            try:
+                print(f"Sending email to {len(recipients)} recipient(s) for HARDFAILURE alert_instance_id={alert_instance_id}")
+                mailer.send_mail(
+                    recipients=recipients,
+                    subject=subject,
+                    text_body=text_body,
+                    html_body=html_body,
+                    inline_images=inline_images,
+                )
+
+                execute_query(
+                    """
+                    UPDATE pipeline.alert_instance
+                       SET notification_sent = TRUE,
+                           notification_sent_at = CURRENT_TIMESTAMP
+                     WHERE alert_instance_id = %(id)s;
+                    """,
+                    {"id": alert_instance_id},
+                    fetch=False,
+                )
+                print(f"Email sent and alert_instance marked sent (hardfailure): alert_instance_id={alert_instance_id}")
+            except Exception as ex:
+                print(f"Error sending HARDFAILURE email for alert_instance_id={alert_instance_id}: {ex}")
+                execute_query(
+                    """
+                    UPDATE pipeline.alert_instance
+                       SET alert_data = COALESCE(alert_data, '{}'::jsonb) || jsonb_build_object('email_error', %(err)s)
+                     WHERE alert_instance_id = %(id)s;
+                    """,
+                    {"id": alert_instance_id, "err": str(ex)},
+                    fetch=False,
+                )
+
+            created += 1
+
+    print(f"Finished process_hardfailure_alerts; created {created} alert_instance row(s)")
+    return created
+
+
+
 def main():
     print(f"{datetime.utcnow().isoformat()}Z - Starting alert processor")
     print(f"Running alert_processor from: {Path(__file__).resolve()}")
     count = process_completion_alerts()
     print(f"{datetime.utcnow().isoformat()}Z - Processed completion alerts: created {count} alert_instance row(s).")
+
+    # NEW: also process hardfailure alerts
+    hf_count = process_hardfailure_alerts()
+    print(f"{datetime.utcnow().isoformat()}Z - Processed hardfailure alerts: created {hf_count} alert_instance row(s).")
+
+
 
 if __name__ == "__main__":
     main()

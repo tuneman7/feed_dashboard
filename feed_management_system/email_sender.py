@@ -10,6 +10,9 @@ from email.utils import formataddr, formatdate, make_msgid
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+from email.mime.image import MIMEImage
+
+
 import boto3
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -120,22 +123,38 @@ class GmailSender:
         recipients: list,
         subject: str,
         text_body: str,
-        html_body: str | None
+        html_body: str | None,
+        inline_images: dict[str, bytes] | None = None,  # NEW
     ):
-        """Build a multipart/alternative email message."""
-        msg = MIMEMultipart("alternative")
-        msg["From"] = formataddr((sender_name, sender_email))
-        msg["To"] = ", ".join(recipients)
-        msg["Subject"] = subject
-        msg["Date"] = formatdate(localtime=True)
-        msg["Message-ID"] = make_msgid(domain="gmail.com")
-        msg["Reply-To"] = sender_email
-        
-        msg.attach(MIMEText(text_body, "plain", "utf-8"))
+        # Root is 'related' so inline images can be referenced by cid
+        root = MIMEMultipart("related")
+        root["From"] = formataddr((sender_name, sender_email))
+        root["To"] = ", ".join(recipients)
+        root["Subject"] = subject
+        root["Date"] = formatdate(localtime=True)
+        root["Message-ID"] = make_msgid(domain="gmail.com")
+        root["Reply-To"] = sender_email
+
+        # Alternative part (text + html)
+        alt = MIMEMultipart("alternative")
+        alt.attach(MIMEText(text_body, "plain", "utf-8"))
         if html_body:
-            msg.attach(MIMEText(html_body, "html", "utf-8"))
-        
-        return msg
+            alt.attach(MIMEText(html_body, "html", "utf-8"))
+        root.attach(alt)
+
+        # Inline images (Content-ID)
+        if inline_images:
+            for cid, img_bytes in inline_images.items():
+                if not img_bytes:
+                    continue
+                img = MIMEImage(img_bytes, _subtype="png")
+                img.add_header("Content-ID", f"<{cid}>")
+                img.add_header("Content-Disposition", "inline", filename=f"{cid}.png")
+                # Optional but helps some clients
+                img.add_header("X-Attachment-Id", cid)
+                root.attach(img)
+
+        return root
     
     def send_mail(
         self,
@@ -144,7 +163,8 @@ class GmailSender:
         text_body: str,
         html_body: str | None = None,
         sender_email: str | None = None,
-        sender_name: str | None = None
+        sender_name: str | None = None,
+        inline_images: dict[str, bytes] | None = None,   # NEW
     ):
         """
         Send an email via Gmail SMTP using OAuth2.
@@ -180,7 +200,8 @@ class GmailSender:
             recipients,
             subject,
             text_body,
-            html_body
+            html_body,
+            inline_images=inline_images,  # NEW
         )
         
         # Send via SMTP
