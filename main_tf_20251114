@@ -1,0 +1,1008 @@
+# Variable for RDS instance identifier
+variable "rds_instance_identifier" {
+  description = "RDS instance identifier to configure security groups for"
+  type        = string
+  default     = "dst-dashboard-database-fast"
+}
+
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
+    http = {
+      source  = "hashicorp/http"
+      version = "~> 3.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = "us-east-1"
+}
+
+# Get the user's current public IP
+data "http" "user_ip" {
+  url = "https://ipv4.icanhazip.com"
+}
+
+# TO THIS:
+data "aws_vpc" "rds_vpc" {
+  id = "vpc-096bd6f8908539c7f"  # Your RDS VPC
+}
+
+# Get available AZs in the region
+data "aws_availability_zones" "available" {
+  state = "available"
+}
+
+# Get PUBLIC subnets in the RDS VPC
+data "aws_subnets" "default" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.rds_vpc.id]
+  }
+  
+  filter {
+    name   = "map-public-ip-on-launch"
+    values = ["true"]
+  }
+}
+
+# Get the most recent Ubuntu 22.04 LTS AMI
+data "aws_ami" "ubuntu" {
+  most_recent = true
+  owners      = ["099720109477"] # Canonical
+
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+}
+
+# Add random suffix to avoid key name conflicts
+resource "random_id" "key_suffix" {
+  byte_length = 4
+}
+
+
+# Reference the existing IAM role for EC2
+data "aws_iam_role" "ec2_role" {
+  name = "EC2-Permissions-S4-BIDL"
+}
+
+# Create an instance profile for the EC2 instance
+resource "aws_iam_instance_profile" "ec2_profile" {
+  name = "ec2-s4-bidl-profile-${random_id.key_suffix.hex}"
+  role = data.aws_iam_role.ec2_role.name
+}
+
+# Create an SSH key pair
+resource "tls_private_key" "ssh_key" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
+resource "aws_key_pair" "deployer_key" {
+  key_name   = "deployer-key-default-vpc-${random_id.key_suffix.hex}"
+  public_key = tls_private_key.ssh_key.public_key_openssh
+}
+
+resource "local_file" "private_key" {
+  filename        = "${path.module}/id_rsa"
+  content         = tls_private_key.ssh_key.private_key_pem
+  file_permission = "0400"
+}
+
+# Create a security group that allows SSH and HTTP traffic
+resource "aws_security_group" "ssh" {
+  name_prefix = "allow_ssh_http_default_vpc_"
+  description = "Allow SSH and HTTP traffic"
+  vpc_id      = data.aws_vpc.rds_vpc.id
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "SSH access"
+  }
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "HTTP access"
+  }
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "HTTPS access"
+  }
+
+  ingress {
+    from_port   = 5050
+    to_port     = 5050
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "pgAdmin access"
+  }
+
+  ingress {
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "PostgreSQL access"
+  }
+
+  ingress {
+    from_port   = 3000
+    to_port     = 3010
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "Development server range"
+  }
+
+  ingress {
+    from_port   = 8501
+    to_port     = 8501
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "Streamlit default port"
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "All outbound traffic"
+  }
+
+  tags = {
+    Name = "allow-ssh-http-default-vpc"
+  }
+}
+
+# Launch an Ubuntu EC2 instance with Git, Python, pip
+resource "aws_instance" "ubuntu_box" {
+  ami                         = data.aws_ami.ubuntu.id
+  instance_type               = "t3.small"  # Changed from t3.medium for better AZ compatibility
+  subnet_id                   = data.aws_subnets.default.ids[0]
+  associate_public_ip_address = true
+  key_name                    = aws_key_pair.deployer_key.key_name
+  vpc_security_group_ids      = [aws_security_group.ssh.id]
+  iam_instance_profile        = aws_iam_instance_profile.ec2_profile.name  # ADD THIS LINE
+
+
+  user_data = <<-EOF
+              #!/bin/bash
+              
+              # Update package list
+              apt update -y
+              
+              # Install essential development tools
+              apt install -y \
+                git \
+                python3 \
+                python3-pip \
+                python-is-python3 \
+                python3-venv \
+                curl \
+                wget \
+                vim \
+                nano \
+                htop \
+                tree \
+                unzip \
+                dos2unix \
+                build-essential \
+                software-properties-common \
+                apt-transport-https \
+                ca-certificates \
+                gnupg \
+                lsb-release
+              
+              # Install AWS CLI v2
+              curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+              unzip awscliv2.zip
+              ./aws/install
+              rm -rf aws awscliv2.zip                            
+
+
+              # Install Docker
+              curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+              echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+              apt update -y
+              apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+              
+              # Add ubuntu user to docker group
+              usermod -aG docker ubuntu
+              
+              # Install Node.js (LTS)
+              curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
+              apt install -y nodejs
+              
+              # Install PostgreSQL
+              apt install -y postgresql postgresql-contrib postgresql-client
+              
+              # Configure PostgreSQL
+              systemctl enable postgresql
+              systemctl start postgresql
+              
+              # Wait for PostgreSQL to be ready
+              sleep 5
+              until sudo -u postgres pg_isready; do
+                sleep 2
+              done
+              
+              # Set up PostgreSQL user and database
+              sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
+              sudo -u postgres createdb devdb
+              
+              # Configure PostgreSQL to accept connections
+              PG_VERSION=$(sudo -u postgres psql -t -c "SELECT version();" | grep -oP '\\d+\\.\\d+' | head -1)
+              PG_CONFIG_DIR="/etc/postgresql/$PG_VERSION/main"
+              
+              # Backup original configs
+              cp "$PG_CONFIG_DIR/postgresql.conf" "$PG_CONFIG_DIR/postgresql.conf.backup"
+              cp "$PG_CONFIG_DIR/pg_hba.conf" "$PG_CONFIG_DIR/pg_hba.conf.backup"
+              
+              # Allow local connections with password
+              sed -i "s/#listen_addresses = 'localhost'/listen_addresses = '*'/" "$PG_CONFIG_DIR/postgresql.conf"
+              
+              # Add connection rules (check if they don't already exist)
+              grep -qxF "host all all 0.0.0.0/0 md5" "$PG_CONFIG_DIR/pg_hba.conf" || echo "host all all 0.0.0.0/0 md5" >> "$PG_CONFIG_DIR/pg_hba.conf"
+              grep -qxF "local all all md5" "$PG_CONFIG_DIR/pg_hba.conf" || echo "local all all md5" >> "$PG_CONFIG_DIR/pg_hba.conf"
+              
+              # Restart PostgreSQL to apply changes
+              systemctl restart postgresql
+              
+              # Wait for restart and verify it's running
+              sleep 3
+              until sudo -u postgres pg_isready; do
+                sleep 2
+              done
+              
+              # Test database connection
+              sudo -u postgres psql -d devdb -c "SELECT 'PostgreSQL is working!' as status;"
+              
+              # Ensure python command works (fallback method)
+              if ! command -v python &> /dev/null; then
+                  update-alternatives --install /usr/bin/python python /usr/bin/python3 1
+              fi
+              
+              # Install common Python packages
+              pip3 install --upgrade pip
+              pip3 install virtualenv pipenv poetry
+              
+              # Create app directory for user
+              mkdir -p /home/ubuntu/app
+              chown ubuntu:ubuntu /home/ubuntu/app
+              
+              # Create a simple status file
+              echo "Instance setup completed at $(date)" > /home/ubuntu/setup_complete.txt
+              echo "Installed packages:" >> /home/ubuntu/setup_complete.txt
+              echo "- Python $(python3 --version)" >> /home/ubuntu/setup_complete.txt
+              echo "- Python alias: $(python --version 2>/dev/null || echo 'NOT WORKING - FIXED BELOW')" >> /home/ubuntu/setup_complete.txt
+              echo "- Docker $(docker --version)" >> /home/ubuntu/setup_complete.txt
+              echo "- Node.js $(node --version)" >> /home/ubuntu/setup_complete.txt
+              echo "- npm $(npm --version)" >> /home/ubuntu/setup_complete.txt
+              echo "- PostgreSQL $(sudo -u postgres psql -t -c 'SELECT version();' | head -1 | xargs)" >> /home/ubuntu/setup_complete.txt
+              echo "" >> /home/ubuntu/setup_complete.txt
+              echo "PostgreSQL Info:" >> /home/ubuntu/setup_complete.txt
+              echo "- Service status: $(systemctl is-active postgresql)" >> /home/ubuntu/setup_complete.txt
+              echo "- Service enabled: $(systemctl is-enabled postgresql)" >> /home/ubuntu/setup_complete.txt
+              echo "- Connection test: $(sudo -u postgres pg_isready)" >> /home/ubuntu/setup_complete.txt
+              echo "- Default database: devdb" >> /home/ubuntu/setup_complete.txt
+              echo "- Username: postgres" >> /home/ubuntu/setup_complete.txt
+              echo "- Password: postgres" >> /home/ubuntu/setup_complete.txt
+              echo "- Connection: psql -h localhost -U postgres -d devdb" >> /home/ubuntu/setup_complete.txt
+              echo "- PgAdmin connection host: 172.17.0.1 (from Docker containers)" >> /home/ubuntu/setup_complete.txt
+              
+              # Final fix for python command if still not working
+              if ! sudo -u ubuntu python --version &> /dev/null; then
+                  echo 'alias python=python3' >> /home/ubuntu/.bashrc
+                  echo 'export PATH="/usr/bin:$PATH"' >> /home/ubuntu/.bashrc
+                  ln -sf /usr/bin/python3 /usr/local/bin/python
+              fi
+              
+              chown ubuntu:ubuntu /home/ubuntu/setup_complete.txt
+              
+              # Ensure Docker service is running
+              systemctl enable docker
+              systemctl start docker
+              
+              # Test that python command works for ubuntu user
+              sudo -u ubuntu bash -c 'cd /home/ubuntu && python --version' >> /home/ubuntu/setup_complete.txt 2>&1 || echo "Python command still needs manual fix" >> /home/ubuntu/setup_complete.txt
+              EOF
+
+  tags = {
+    Name = "ubuntu-default-vpc"
+  }
+}
+
+# Create connect.sh script automatically
+resource "local_file" "connect_script" {
+  filename = "${path.module}/connect.sh"
+  content = templatefile("${path.module}/connect.sh.tpl", {
+    public_ip = aws_instance.ubuntu_box.public_ip
+  })
+  file_permission = "0755"
+}
+
+# Create RDS security group fix script
+resource "local_file" "rds_security_fix_script" {
+  filename = "${path.module}/fix-rds-security.sh"
+  content = <<-EOT
+#!/bin/bash
+
+# Improved RDS Security Group Fix Script
+# This script adds the EC2 instance and local user IP to the RDS security group to allow database connections
+
+echo "======================================="
+echo "RDS Security Group Configuration Script"
+echo "======================================="
+echo
+
+# Configuration - these will be substituted by Terraform
+RDS_INSTANCE="${var.rds_instance_identifier}"
+EC2_INSTANCE_ID="${aws_instance.ubuntu_box.id}"
+EC2_SECURITY_GROUP_ID="${aws_security_group.ssh.id}"
+EC2_PUBLIC_IP="${aws_instance.ubuntu_box.public_ip}"
+USER_LOCAL_IP="${trimspace(data.http.user_ip.response_body)}"
+
+# Validation
+if [ -z "$RDS_INSTANCE" ]; then
+    echo "❌ No RDS instance identifier provided"
+    echo "Set the rds_instance_identifier variable in Terraform"
+    return 1 2>/dev/null || { echo "Script terminated"; return; }
+fi
+
+echo "🔍 Configuration:"
+echo "   EC2 Instance ID: $EC2_INSTANCE_ID"
+echo "   EC2 Security Group: $EC2_SECURITY_GROUP_ID"
+echo "   EC2 Public IP: $EC2_PUBLIC_IP"
+echo "   User Local IP: $USER_LOCAL_IP"
+echo "   RDS Instance: $RDS_INSTANCE"
+echo
+
+# Get RDS instance details
+echo "🔍 Getting RDS instance details..."
+RDS_INFO=$(aws rds describe-db-instances --db-instance-identifier "$RDS_INSTANCE" --output json 2>/dev/null)
+
+if [ $? -ne 0 ] || [ -z "$RDS_INFO" ]; then
+    echo "❌ Could not find RDS instance: $RDS_INSTANCE"
+    echo "   Please check the RDS instance name and ensure it exists."
+    echo "   Available instances:"
+    aws rds describe-db-instances --query 'DBInstances[].DBInstanceIdentifier' --output text 2>/dev/null || echo "   Could not list instances"
+    return 1 2>/dev/null || { echo "Script terminated"; return; }
+fi
+
+# Extract details
+RDS_ENGINE=$(echo "$RDS_INFO" | jq -r '.DBInstances[0].Engine')
+RDS_PORT=$(echo "$RDS_INFO" | jq -r '.DBInstances[0].Endpoint.Port')
+RDS_ENDPOINT=$(echo "$RDS_INFO" | jq -r '.DBInstances[0].Endpoint.Address')
+RDS_STATUS=$(echo "$RDS_INFO" | jq -r '.DBInstances[0].DBInstanceStatus')
+RDS_SECURITY_GROUPS=$(echo "$RDS_INFO" | jq -r '.DBInstances[0].VpcSecurityGroups[].VpcSecurityGroupId' | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+
+echo "✅ RDS Details:"
+echo "   Engine: $RDS_ENGINE"
+echo "   Port: $RDS_PORT"
+echo "   Endpoint: $RDS_ENDPOINT"
+echo "   Status: $RDS_STATUS"
+echo "   Security Groups: $RDS_SECURITY_GROUPS"
+echo
+
+if [ "$RDS_STATUS" != "available" ]; then
+    echo "⚠️  Warning: RDS instance status is '$RDS_STATUS', not 'available'"
+    echo "   Connection may not work until the instance is available"
+fi
+
+# Function to safely add security group rule
+add_sg_rule() {
+    local sg_id=$1
+    local rule_type=$2
+    local rule_value=$3
+    local description=$4
+    
+    echo "➕ Adding $description..."
+    
+    if [ "$rule_type" = "source-group" ]; then
+        # Check if rule exists
+        EXISTING=$(aws ec2 describe-security-groups --group-ids "$sg_id" \
+            --query "SecurityGroups[0].IpPermissions[?FromPort==\`$RDS_PORT\` && ToPort==\`$RDS_PORT\` && UserIdGroupPairs[?GroupId==\`$rule_value\`]]" \
+            --output text 2>/dev/null)
+        
+        if [ -n "$EXISTING" ] && [ "$EXISTING" != "None" ]; then
+            echo "   ✅ Rule already exists"
+        else
+            aws ec2 authorize-security-group-ingress \
+                --group-id "$sg_id" \
+                --protocol tcp \
+                --port "$RDS_PORT" \
+                --source-group "$rule_value" 2>/dev/null && echo "   ✅ Added successfully" || echo "   ⚠️  Failed to add (might already exist)"
+           
+            #Manually add ecs security group
+            aws ec2 authorize-security-group-ingress \
+                --group-id "$sg_id" \
+                --protocol tcp \
+                --port "$RDS_PORT" \
+                --source-group "sg-0aceb03556342fc21" 2>/dev/null && echo "   ✅ Added successfully" || echo "   ⚠️  Failed to add (might already exist)"
+                
+        fi
+    else
+        # CIDR rule
+        EXISTING=$(aws ec2 describe-security-groups --group-ids "$sg_id" \
+            --query "SecurityGroups[0].IpPermissions[?FromPort==\`$RDS_PORT\` && ToPort==\`$RDS_PORT\` && IpRanges[?CidrIp==\`$rule_value\`]]" \
+            --output text 2>/dev/null)
+        
+        if [ -n "$EXISTING" ] && [ "$EXISTING" != "None" ]; then
+            echo "   ✅ Rule already exists"
+        else
+            aws ec2 authorize-security-group-ingress \
+                --group-id "$sg_id" \
+                --protocol tcp \
+                --port "$RDS_PORT" \
+                --cidr "$rule_value" 2>/dev/null && echo "   ✅ Added successfully" || echo "   ⚠️  Failed to add (might already exist)"
+        fi
+    fi
+}
+
+# Configure each RDS security group
+for RDS_SG_ID in $RDS_SECURITY_GROUPS; do
+    echo "🔧 Configuring RDS security group: $RDS_SG_ID"
+    
+    # Get security group name for better identification
+    SG_NAME=$(aws ec2 describe-security-groups --group-ids "$RDS_SG_ID" --query 'SecurityGroups[0].GroupName' --output text 2>/dev/null || echo "unknown")
+    echo "   Security Group Name: $SG_NAME"
+    
+    # Add EC2 security group access
+    add_sg_rule "$RDS_SG_ID" "source-group" "$EC2_SECURITY_GROUP_ID" "EC2 security group access"
+    
+    # Add EC2 public IP access
+    add_sg_rule "$RDS_SG_ID" "cidr" "$EC2_PUBLIC_IP/32" "EC2 public IP access"
+    
+    # Add user's local IP access
+    add_sg_rule "$RDS_SG_ID" "cidr" "$USER_LOCAL_IP/32" "user's local IP access"
+    
+    echo
+done
+
+echo "🎉 Security group configuration complete!"
+echo
+
+# Test connectivity
+echo "🧪 Testing connectivity..."
+echo "   From local machine:"
+echo "     nslookup $RDS_ENDPOINT"
+echo "     telnet $RDS_ENDPOINT $RDS_PORT"
+echo "   From EC2 instance:"
+echo "     ssh to EC2 and run: telnet $RDS_ENDPOINT $RDS_PORT"
+echo
+
+# Connection examples based on database engine
+echo "🔌 Connection Examples:"
+case $RDS_ENGINE in
+    "postgres")
+        echo "   PostgreSQL: psql -h $RDS_ENDPOINT -p $RDS_PORT -U username -d database"
+        echo "   Connection String: postgresql://username:password@$RDS_ENDPOINT:$RDS_PORT/database"
+        ;;
+    "mysql")
+        echo "   MySQL: mysql -h $RDS_ENDPOINT -P $RDS_PORT -u username -p database"
+        echo "   Connection String: mysql://username:password@$RDS_ENDPOINT:$RDS_PORT/database"
+        ;;
+    "mariadb")
+        echo "   MariaDB: mysql -h $RDS_ENDPOINT -P $RDS_PORT -u username -p database"
+        echo "   Connection String: mysql://username:password@$RDS_ENDPOINT:$RDS_PORT/database"
+        ;;
+    *)
+        echo "   Database: Connect using appropriate client for $RDS_ENGINE on $RDS_ENDPOINT:$RDS_PORT"
+        ;;
+esac
+
+echo
+echo "📋 Summary:"
+echo "- Added EC2 security group ($EC2_SECURITY_GROUP_ID) to RDS security groups"
+echo "- Added EC2 public IP ($EC2_PUBLIC_IP/32) to RDS security groups"
+echo "- Added user's local IP ($USER_LOCAL_IP/32) to RDS security groups"
+echo "- Database engine: $RDS_ENGINE on port $RDS_PORT"
+echo "- RDS endpoint: $RDS_ENDPOINT"
+echo
+echo "🔧 Both your EC2 instance and local machine should now be able to connect to RDS!"
+
+EOT
+  file_permission = "0755"
+}
+
+# Create RDS security group cleanup script
+resource "local_file" "rds_security_cleanup_script" {
+  filename = "${path.module}/cleanup-rds-security.sh"
+  content = <<-EOT
+#!/bin/bash
+
+# RDS Security Group Cleanup Script
+# This script removes ALL rules from the RDS security group to ensure it can be deleted
+
+set +e
+
+echo "======================================="
+echo "RDS Security Group Cleanup Script"
+echo "======================================="
+echo
+
+# Configuration
+RDS_INSTANCE="${var.rds_instance_identifier}"
+EC2_INSTANCE_ID="${aws_instance.ubuntu_box.id}"
+EC2_SECURITY_GROUP_ID="${aws_security_group.ssh.id}"
+EC2_PUBLIC_IP="${aws_instance.ubuntu_box.public_ip}"
+USER_LOCAL_IP="${trimspace(data.http.user_ip.response_body)}"
+
+if [ -z "$RDS_INSTANCE" ]; then
+    echo "❌ No RDS instance identifier provided"
+    echo "Set the rds_instance_identifier variable in Terraform"
+    exit 1
+fi
+
+echo "🔍 EC2 Instance ID: $EC2_INSTANCE_ID"
+echo "🔍 EC2 Security Group: $EC2_SECURITY_GROUP_ID"
+echo "🔍 EC2 Public IP: $EC2_PUBLIC_IP"
+echo "🔍 User Local IP: $USER_LOCAL_IP"
+echo "🔍 RDS Instance: $RDS_INSTANCE"
+echo
+
+echo "🔍 Finding RDS instance security groups..."
+RDS_SECURITY_GROUPS=$(aws rds describe-db-instances \
+    --db-instance-identifier "$RDS_INSTANCE" \
+    --query 'DBInstances[0].VpcSecurityGroups[*].VpcSecurityGroupId' \
+    --output text 2>/dev/null)
+
+if [ -z "$RDS_SECURITY_GROUPS" ]; then
+    echo "❌ Could not find RDS instance: $RDS_INSTANCE"
+    echo "Please check the RDS instance name and ensure it exists."
+    exit 1
+fi
+
+echo "✅ Found RDS Security Groups: $RDS_SECURITY_GROUPS"
+echo
+
+# For each RDS security group, remove ALL ingress rules
+for RDS_SG_ID in $RDS_SECURITY_GROUPS; do
+    echo "🧹 Cleaning up RDS security group: $RDS_SG_ID"
+    
+    # Get all ingress rules for this security group
+    INGRESS_RULES=$(aws ec2 describe-security-groups \
+        --group-ids "$RDS_SG_ID" \
+        --query 'SecurityGroups[0].IpPermissions' \
+        --output json 2>/dev/null)
+    
+    if [ "$INGRESS_RULES" = "[]" ] || [ -z "$INGRESS_RULES" ]; then
+        echo "ℹ️  No ingress rules found in security group $RDS_SG_ID"
+    else
+        echo "🔍 Found ingress rules, removing all..."
+        
+        # Remove all ingress rules at once
+        aws ec2 revoke-security-group-ingress \
+            --group-id "$RDS_SG_ID" \
+            --ip-permissions "$INGRESS_RULES" 2>/dev/null || echo "⚠️  Some rules might not exist or couldn't be removed"
+        
+        echo "✅ Removed all ingress rules from security group $RDS_SG_ID"
+    fi
+    
+    # Also specifically try to remove the rules we know about (fallback)
+    echo "🔄 Attempting specific rule cleanup as fallback..."
+    
+    # Remove EC2 security group rule
+    aws ec2 revoke-security-group-ingress \
+        --group-id "$RDS_SG_ID" \
+        --protocol tcp \
+        --port 5432 \
+        --source-group "$EC2_SECURITY_GROUP_ID" 2>/dev/null || echo "ℹ️  EC2 security group rule already removed or didn't exist"
+    
+    # Remove EC2 public IP rule
+    aws ec2 revoke-security-group-ingress \
+        --group-id "$RDS_SG_ID" \
+        --protocol tcp \
+        --port 5432 \
+        --cidr "$EC2_PUBLIC_IP/32" 2>/dev/null || echo "ℹ️  EC2 public IP rule already removed or didn't exist"
+    
+    # Remove user's local IP rule
+    aws ec2 revoke-security-group-ingress \
+        --group-id "$RDS_SG_ID" \
+        --protocol tcp \
+        --port 5432 \
+        --cidr "$USER_LOCAL_IP/32" 2>/dev/null || echo "ℹ️  User local IP rule already removed or didn't exist"
+    
+    # Check for any remaining rules
+    REMAINING_RULES=$(aws ec2 describe-security-groups \
+        --group-ids "$RDS_SG_ID" \
+        --query 'SecurityGroups[0].IpPermissions' \
+        --output text 2>/dev/null)
+    
+    if [ "$REMAINING_RULES" = "None" ] || [ -z "$REMAINING_RULES" ]; then
+        echo "✅ Security group $RDS_SG_ID is now clean and ready for deletion"
+    else
+        echo "⚠️  Some rules may still remain in security group $RDS_SG_ID"
+        echo "    You may need to manually remove them before deleting the security group"
+    fi
+    
+    echo
+done
+
+echo "🎉 Security group cleanup complete!"
+echo
+
+# Get RDS endpoint for reference
+RDS_ENDPOINT=$(aws rds describe-db-instances \
+    --db-instance-identifier "$RDS_INSTANCE" \
+    --query 'DBInstances[0].Endpoint.Address' \
+    --output text 2>/dev/null || echo "unknown")
+
+echo "📋 Summary:"
+echo "- Removed all ingress rules from RDS security groups"
+echo "- Security groups should now be ready for deletion"
+echo "- RDS endpoint: $RDS_ENDPOINT"
+echo
+echo "🔒 All access to RDS has been removed!"
+echo "💡 RDS security groups are now clean and can be safely deleted"
+EOT
+  file_permission = "0755"
+}
+
+# Create check-ready.sh script
+resource "local_file" "check_ready_script" {
+  filename = "${path.module}/check-ready.sh"
+  content = <<-EOT
+#!/bin/bash
+
+# Instance Readiness Checker
+# This script waits until the Ubuntu box is fully set up
+
+echo "======================================="
+echo "Checking Ubuntu EC2 Instance Readiness"
+echo "======================================="
+
+PUBLIC_IP="${aws_instance.ubuntu_box.public_ip}"
+
+if [ ! -f "id_rsa" ]; then
+    echo "❌ Private key file 'id_rsa' not found"
+    exit 1
+fi
+
+chmod 400 id_rsa
+
+echo "🔍 Checking instance: ubuntu@$PUBLIC_IP"
+echo "⏳ Waiting for instance to be fully ready..."
+echo
+
+# Function to check if instance is ready
+check_ready() {
+    # Test basic SSH connectivity
+    if ! ssh -i id_rsa -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$PUBLIC_IP 'echo "SSH OK"' >/dev/null 2>&1; then
+        return 1
+    fi
+    
+    # Check if setup completion file exists
+    if ! ssh -i id_rsa -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$PUBLIC_IP 'test -f ~/setup_complete.txt' >/dev/null 2>&1; then
+        return 1
+    fi
+    
+    # Check if Docker is working
+    if ! ssh -i id_rsa -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$PUBLIC_IP 'docker --version' >/dev/null 2>&1; then
+        return 1
+    fi
+    
+    # Check if Python is working
+    if ! ssh -i id_rsa -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$PUBLIC_IP 'python --version' >/dev/null 2>&1; then
+        return 1
+    fi
+    
+    return 0
+}
+
+# Wait loop
+ATTEMPTS=0
+MAX_ATTEMPTS=60  # 5 minutes max wait time
+
+while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
+    if check_ready; then
+        echo
+        echo "✅ Instance is ready!"
+        echo
+        
+        # Show setup summary
+        echo "📋 Setup Summary:"
+        ssh -i id_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$PUBLIC_IP 'cat ~/setup_complete.txt' 2>/dev/null || echo "Setup details not available"
+        
+        echo
+        echo "🎉 Your Ubuntu development box is ready to use!"
+        echo "   Run ./deploy.sh to deploy your code and connect"
+        echo "   Or run ./connect.sh to just connect"
+        
+        exit 0
+    fi
+    
+    ATTEMPTS=$((ATTEMPTS + 1))
+    printf "."
+    sleep 5
+done
+
+echo
+echo "❌ Timeout: Instance did not become ready within 5 minutes"
+echo "   This might indicate an issue with the setup process"
+echo "   You can try connecting manually: ./connect.sh"
+EOT
+  file_permission = "0755"
+}
+
+# Outputs
+output "public_ip" {
+  description = "Public IP address of the EC2 instance"
+  value       = aws_instance.ubuntu_box.public_ip
+}
+
+output "user_local_ip" {
+  description = "User's local public IP address"
+  value       = trimspace(data.http.user_ip.response_body)
+}
+
+output "ssh_command" {
+  description = "SSH command to connect to the instance"
+  value       = "ssh -i id_rsa ubuntu@${aws_instance.ubuntu_box.public_ip}"
+}
+
+output "key_name" {
+  description = "Name of the AWS key pair created"
+  value       = aws_key_pair.deployer_key.key_name
+}
+
+output "instance_id" {
+  description = "ID of the EC2 instance"
+  value       = aws_instance.ubuntu_box.id
+}
+
+output "setup_status" {
+  description = "Command to check if instance setup is complete"
+  value       = "./check-ready.sh"
+}
+
+output "rds_fix_command" {
+  description = "Command to configure RDS security groups for EC2 and local access"
+  value       = "./fix-rds-security.sh"
+}
+
+output "rds_cleanup_command" {
+  description = "Command to remove ALL access from RDS security groups"
+  value       = "./cleanup-rds-security.sh"
+}
+
+# -------------------------------------------------------------------
+# NEW (appended): Route53 + ACM + ALB (HTTPS) + Streamlit on port 8501
+# -------------------------------------------------------------------
+
+# Look up the public hosted zone for dmtdashboard.link
+data "aws_route53_zone" "dmtdashboard" {
+  name         = "dmtdashboard.link."
+  private_zone = false
+}
+
+# Request an ACM certificate for apex domain (DNS validation)
+resource "aws_acm_certificate" "dmtdashboard" {
+  domain_name       = "dmtdashboard.link"
+  validation_method = "DNS"
+  lifecycle {
+    create_before_destroy = true
+  }
+  tags = { Name = "dmtdashboard.link" }
+}
+
+# Create the DNS records required for ACM validation
+resource "aws_route53_record" "dmtdashboard_cert_validation" {
+  for_each = {
+    for dvo in aws_acm_certificate.dmtdashboard.domain_validation_options :
+    dvo.domain_name => {
+      name  = dvo.resource_record_name
+      type  = dvo.resource_record_type
+      value = dvo.resource_record_value
+    }
+  }
+
+  zone_id = data.aws_route53_zone.dmtdashboard.zone_id
+  name    = each.value.name
+  type    = each.value.type
+  ttl     = 60
+  records = [each.value.value]
+}
+
+# Finalize validation of the ACM certificate
+resource "aws_acm_certificate_validation" "dmtdashboard" {
+  certificate_arn         = aws_acm_certificate.dmtdashboard.arn
+  validation_record_fqdns = [for r in aws_route53_record.dmtdashboard_cert_validation : r.fqdn]
+}
+
+# Security group for the ALB (public 80/443)
+resource "aws_security_group" "alb" {
+  name_prefix = "dmtdashboard-alb-"
+  description = "Allow HTTP/HTTPS to ALB"
+  vpc_id      = data.aws_vpc.rds_vpc.id
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "HTTP"
+  }
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "HTTPS"
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "All egress"
+  }
+
+  tags = { Name = "dmtdashboard-alb" }
+}
+
+# Application Load Balancer (public)
+resource "aws_lb" "dmtdashboard" {
+  name               = "dmtdashboard-alb"
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb.id]
+  subnets            = data.aws_subnets.default.ids
+  idle_timeout       = 60
+
+  tags = { Name = "dmtdashboard-alb" }
+}
+
+# Target group for port 80 (kept for flexibility/health checks)
+resource "aws_lb_target_group" "dmtdashboard" {
+  name        = "dmtdashboard-tg"
+  port        = 80
+  protocol    = "HTTP"
+  vpc_id      = data.aws_vpc.rds_vpc.id
+  target_type = "instance"
+
+  health_check {
+    path                = "/"
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    timeout             = 5
+    interval            = 30
+    matcher             = "200-399"
+  }
+
+  tags = { Name = "dmtdashboard-tg" }
+}
+
+# Attach EC2 instance to port-80 target group
+resource "aws_lb_target_group_attachment" "dmtdashboard" {
+  target_group_arn = aws_lb_target_group.dmtdashboard.arn
+  target_id        = aws_instance.ubuntu_box.id
+  port             = 80
+}
+
+# Target group for Streamlit (port 8501)
+resource "aws_lb_target_group" "dmtdashboard_streamlit" {
+  name        = "dmtdashboard-tg-8501"
+  port        = 8501
+  protocol    = "HTTP"
+  vpc_id      = data.aws_vpc.rds_vpc.id
+  target_type = "instance"
+
+  health_check {
+    path                = "/"
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    timeout             = 5
+    interval            = 30
+    matcher             = "200-399"
+    port                = "traffic-port"
+  }
+
+  tags = { Name = "dmtdashboard-tg-8501" }
+}
+
+# Attach EC2 instance to 8501 target group
+resource "aws_lb_target_group_attachment" "dmtdashboard_streamlit" {
+  target_group_arn = aws_lb_target_group.dmtdashboard_streamlit.arn
+  target_id        = aws_instance.ubuntu_box.id
+  port             = 8501
+}
+
+# Listener on 80 -> redirect to 443
+resource "aws_lb_listener" "http" {
+  load_balancer_arn = aws_lb.dmtdashboard.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type = "redirect"
+    redirect {
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
+    }
+  }
+}
+
+# Listener on 443 (TLS via ACM) -> forward to Streamlit (8501)
+resource "aws_lb_listener" "https" {
+  load_balancer_arn = aws_lb.dmtdashboard.arn
+  port              = 443
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-2016-08"
+  certificate_arn   = aws_acm_certificate.dmtdashboard.arn
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.dmtdashboard_streamlit.arn
+  }
+
+  depends_on = [aws_acm_certificate_validation.dmtdashboard]
+}
+
+# Route53: apex A/ALIAS -> ALB
+resource "aws_route53_record" "dmtdashboard_apex" {
+  zone_id = data.aws_route53_zone.dmtdashboard.zone_id
+  name    = "dmtdashboard.link"
+  type    = "A"
+
+  alias {
+    name                   = aws_lb.dmtdashboard.dns_name
+    zone_id                = aws_lb.dmtdashboard.zone_id
+    evaluate_target_health = true
+  }
+}
+
+# Optional: www -> apex
+resource "aws_route53_record" "dmtdashboard_www" {
+  zone_id = data.aws_route53_zone.dmtdashboard.zone_id
+  name    = "www"
+  type    = "CNAME"
+  ttl     = 300
+  records = ["dmtdashboard.link"]
+}
+
+# Extra outputs for the new components
+output "alb_dns_name" {
+  description = "Public DNS name of the ALB"
+  value       = aws_lb.dmtdashboard.dns_name
+}
+
+output "domain_url" {
+  description = "HTTPS URL for the site"
+  value       = "https://dmtdashboard.link"
+}

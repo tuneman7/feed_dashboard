@@ -11,7 +11,7 @@ from database_utils import execute_query, init_connection
 
 # Role permissions
 ROLE_PERMISSIONS = {
-    "admin": ["Dashboard", "Database Setup", "System Codes", "Pipeline Management","Alert Management"],
+    "admin": ["Dashboard", "Visualizations", "Database Setup", "System Codes", "Pipeline Management","Alert Management"],
     "manager": ["Dashboard", "Pipeline Management", "Visualizations"],
     "viewer": ["Dashboard", "Visualizations"],
     "developer": ["Dashboard", "System Codes", "Pipeline Management", "Visualizations","Alert Management"]
