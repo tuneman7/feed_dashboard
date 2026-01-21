@@ -196,6 +196,7 @@ def show_run_details(run_id: int):
                         "parent_detail_id",
                         "detail_type",
                         "detail_type_desc",
+                        "detail_desc",
                         "detail_data_preview",
                         "created_at",
                     ]
@@ -206,6 +207,7 @@ def show_run_details(run_id: int):
                     "parent_detail_id": "Parent ID",
                     "detail_type": "Type",
                     "detail_type_desc": "Type Description",
+                    "detail_desc": "Description",
                     "detail_data_preview": "Data",
                     "created_at": "Created At",
                 },
@@ -259,15 +261,15 @@ def dashboard():
 
     # --- CHANGED: state helpers to persist dropdowns across reruns / details page ---
     ENV_WIDGET_KEY = "dashboard_selected_environments"
-    PIPE_WIDGET_KEY = "dashboard_selected_pipelines"
+    PIPE_WIDGET_KEY = "dashboard_selected_pipeline"
     PERSIST_ENV_KEY = "persisted_selected_environments"
-    PERSIST_PIPE_KEY = "persisted_selected_pipelines"
+    PERSIST_PIPE_KEY = "persisted_selected_pipeline"
 
     def _on_env_change():
         st.session_state[PERSIST_ENV_KEY] = st.session_state.get(ENV_WIDGET_KEY, [])
 
     def _on_pipe_change():
-        st.session_state[PERSIST_PIPE_KEY] = st.session_state.get(PIPE_WIDGET_KEY, [])
+        st.session_state[PERSIST_PIPE_KEY] = st.session_state.get(PIPE_WIDGET_KEY, "All")
     # --- END CHANGED ---
 
     try:
@@ -307,39 +309,31 @@ def dashboard():
         ORDER BY pipeline_name;
         """
         pipelines_df = execute_query(pipelines_query)
-        pipeline_options = pipelines_df["pipeline_name"].tolist()
+        pipeline_options = ["All"] + pipelines_df["pipeline_name"].tolist()
 
-        # --- CHANGED: seed persisted pipelines on first load, and seed widget key before rendering ---
+        # --- CHANGED: seed persisted pipeline on first load, and seed widget key before rendering ---
         if PERSIST_PIPE_KEY not in st.session_state:
-            st.session_state[PERSIST_PIPE_KEY] = []
+            st.session_state[PERSIST_PIPE_KEY] = "All"
 
         if PIPE_WIDGET_KEY not in st.session_state:
             st.session_state[PIPE_WIDGET_KEY] = st.session_state[PERSIST_PIPE_KEY]
 
-        # If any stored values are no longer valid, drop them
-        if isinstance(st.session_state.get(PIPE_WIDGET_KEY), list):
-            st.session_state[PIPE_WIDGET_KEY] = [
-                p for p in st.session_state[PIPE_WIDGET_KEY] if p in pipeline_options
-            ]
-            st.session_state[PERSIST_PIPE_KEY] = [
-                p for p in st.session_state[PERSIST_PIPE_KEY] if p in pipeline_options
-            ]
-        else:
-            st.session_state[PIPE_WIDGET_KEY] = []
-            st.session_state[PERSIST_PIPE_KEY] = []
+        # If stored value is no longer valid, fall back to "All"
+        if st.session_state[PIPE_WIDGET_KEY] not in pipeline_options:
+            st.session_state[PIPE_WIDGET_KEY] = "All"
+            st.session_state[PERSIST_PIPE_KEY] = "All"
         # --- END CHANGED ---
 
         with filter_top_col2:
-            selected_pipelines = st.multiselect(
-                "Filter by Pipeline(s):",
-                options=pipeline_options,
+            selected_pipeline = st.selectbox(
+                "Filter by Pipeline:",
+                pipeline_options,
                 key=PIPE_WIDGET_KEY,
-                placeholder="Select pipelines",
                 on_change=_on_pipe_change,
             )
     except Exception as e:
         st.error(f"Error loading pipelines: {e}")
-        selected_pipelines = []
+        selected_pipeline = "All"
     # --- END CHANGED ---
 
     env_display = ", ".join(selected_environments) if selected_environments else "All"
@@ -456,9 +450,8 @@ def dashboard():
     st.subheader("🕒 Recent Pipeline Runs")
 
     # Build pipeline filter
-    if selected_pipelines:
-        pipeline_list = "', '".join(selected_pipelines)
-        pipeline_filter = f"AND f.pipeline_name IN ('{pipeline_list}')"
+    if selected_pipeline and selected_pipeline != "All":
+        pipeline_filter = f"AND f.pipeline_name = '{selected_pipeline}'"
     else:
         pipeline_filter = ""
 
