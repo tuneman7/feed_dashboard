@@ -32,6 +32,44 @@ import re
 import json
 
 
+def transform_alert_to_notification(alert_data):
+    """
+    Transform alert JSON to notification JSON format.
+    Only includes keys that exist in both source and target.
+    """
+    # Create a mapping from detail_type to detail_data
+    detail_map = {}
+    for detail in alert_data.get('run_details', []):
+        detail_type = detail.get('detail_type')
+        detail_data = detail.get('detail_data')
+        if detail_type and detail_data:
+            detail_map[detail_type] = detail_data
+    
+    # Build output with only matching keys
+    output = {}
+    
+    # Map the fields
+    if 'JOB_TYPE' in detail_map:
+        output['job_type'] = detail_map['JOB_TYPE']
+    
+    if 'JOB_FILE_NUMBER' in detail_map:
+        output['job_file_number'] = detail_map['JOB_FILE_NUMBER']
+    
+    if 'BANK_FILE_NUMBER' in detail_map:
+        output['bank_file_number'] = detail_map['BANK_FILE_NUMBER']
+    
+    if 'SOURCE' in detail_map:
+        output['source'] = detail_map['SOURCE']
+    
+    if 'ENV' in detail_map:
+        output['env'] = detail_map['ENV']
+    
+    if 'REQUESTED_AT' in detail_map:
+        output['requested_at'] = detail_map['REQUESTED_AT']
+    
+    return output
+
+
 def send_sqs_notification(
     *,
     queue_url: str,
@@ -659,7 +697,8 @@ def process_completion_alerts(lookback_minutes: int = LOOKBACK_MINUTES) -> int:
 
                     message_ids: List[str] = []
                     for qurl in queue_urls:
-                        resp = send_sqs_notification(queue_url=qurl, message=sqs_message)
+                        transformed_message = transform_alert_to_notification(sqs_message)
+                        resp = send_sqs_notification(queue_url=qurl, message=transformed_message)
                         mid = (resp or {}).get("MessageId")
                         if mid:
                             message_ids.append(mid)
