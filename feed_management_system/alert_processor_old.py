@@ -28,139 +28,6 @@ from email_sender import GmailSender
 
 from pathlib import Path
 import base64
-import re
-import json
-
-
-def send_sqs_notification(
-    *,
-    queue_url: str,
-    message: Dict[str, Any],
-    message_group_id: Optional[str] = None,
-    message_deduplication_id: Optional[str] = None,
-    region_name: str = "us-east-1",
-) -> Dict[str, Any]:
-    """
-    Send a single alert message to SQS.
-
-    - Standard queues: QueueUrl + MessageBody.
-    - FIFO queues (.fifo): MessageGroupId required; MessageDeduplicationId optional.
-    """
-
-    import json
-    import boto3
-    from typing import Any, Dict, Optional
-
-    sqs = boto3.client("sqs", region_name=region_name)
-
-    kwargs: Dict[str, Any] = {
-        "QueueUrl": queue_url,
-        "MessageBody": json.dumps(message, default=str),
-    }
-
-    if queue_url.endswith(".fifo"):
-        if not message_group_id:
-            raise ValueError("FIFO queue requires message_group_id")
-
-        kwargs["MessageGroupId"] = message_group_id
-
-        if message_deduplication_id:
-            kwargs["MessageDeduplicationId"] = message_deduplication_id
-
-    return sqs.send_message(**kwargs)
-
-
-
-
-def get_pipeline_run_details(pipeline_run_id: int) -> List[Dict[str, Any]]:
-    run_details_query = """
-    SELECT 
-        prd.detail_id,
-        prd.parent_detail_id,
-        sc.common_cd as detail_type,
-        sc.code_description as detail_type_desc,
-        prd.detail_desc,
-        prd.detail_data,
-        prd.created_at
-    FROM pipeline.pipeline_run_details prd
-    JOIN admin.system_codes sc ON prd.run_detail_type_cd = sc.code_id
-    WHERE prd.pipeline_run_id = %(rid)s
-    ORDER BY prd.created_at, prd.detail_id;
-    """
-
-    df = execute_query(run_details_query, {"rid": pipeline_run_id}, fetch=True)
-    if df is None or df.empty:
-        return []
-
-    out: List[Dict[str, Any]] = []
-    for _, row in df.iterrows():
-        out.append({
-            "detail_id": int(row["detail_id"]) if row.get("detail_id") is not None else None,
-            "parent_detail_id": int(row["parent_detail_id"]) if row.get("parent_detail_id") is not None else None,
-            "detail_type": row.get("detail_type"),
-            "detail_type_desc": row.get("detail_type_desc"),
-            "detail_desc": row.get("detail_desc"),
-            "detail_data": row.get("detail_data"),
-            "created_at": str(row.get("created_at")) if row.get("created_at") is not None else None,
-        })
-
-    return out
-
-
-
-def split_sqs_queue_urls(recipient_list: str) -> List[str]:
-    """
-    Treat recipient_list as a comma/semicolon/newline separated list of SQS QueueUrls.
-    Example:
-      https://sqs.us-east-1.amazonaws.com/123456789012/my-queue
-      https://sqs.us-east-1.amazonaws.com/123456789012/my-queue.fifo
-    """
-    if not recipient_list:
-        return []
-
-    parts = re.split(r"[,\n;]+", recipient_list)
-    urls = [p.strip() for p in parts if p and p.strip()]
-
-    # Keep validation light (so we don't reject legit URLs due to minor format differences)
-    urls = [u for u in urls if u.startswith("https://sqs.") and "amazonaws.com" in u]
-    return urls
-
-
-
-def get_pipeline_run_details(pipeline_run_id: int) -> List[Dict[str, Any]]:
-    run_details_query = """
-    SELECT 
-        prd.detail_id,
-        prd.parent_detail_id,
-        sc.common_cd as detail_type,
-        sc.code_description as detail_type_desc,
-        prd.detail_desc,
-        prd.detail_data,
-        prd.created_at
-    FROM pipeline.pipeline_run_details prd
-    JOIN admin.system_codes sc ON prd.run_detail_type_cd = sc.code_id
-    WHERE prd.pipeline_run_id = %(rid)s
-    ORDER BY prd.created_at, prd.detail_id;
-    """
-
-    df = execute_query(run_details_query, {"rid": pipeline_run_id}, fetch=True)
-    if df is None or df.empty:
-        return []
-
-    out: List[Dict[str, Any]] = []
-    for _, row in df.iterrows():
-        out.append({
-            "detail_id": int(row["detail_id"]) if row.get("detail_id") is not None else None,
-            "parent_detail_id": int(row["parent_detail_id"]) if row.get("parent_detail_id") is not None else None,
-            "detail_type": row.get("detail_type"),
-            "detail_type_desc": row.get("detail_type_desc"),
-            "detail_desc": row.get("detail_desc"),
-            "detail_data": row.get("detail_data"),
-            "created_at": str(row.get("created_at")) if row.get("created_at") is not None else None,
-        })
-
-    return out
-
 
 
 def load_shift4_logo_base64(filename: str = "shift4_data_systems_team.png") -> str:
@@ -400,7 +267,8 @@ def process_completion_alerts(lookback_minutes: int = LOOKBACK_MINUTES) -> int:
     active_status_id     = get_code_id("ACTIVE", "ALERT_STATUS")
     email_type_id        = get_code_id("EMAIL", "ALERT_NOTIFICATION_TYPE")
     total_count_type_id  = get_code_id("TOTAL_PROCESSED_COUNT", "PIPELINE_RUN_DETAIL_TYPE")
-    sqs_type_id          = get_code_id("SQS", "ALERT_NOTIFICATION_TYPE")
+
+    sqs_type_id         = get_code_id("SQS_ALERT", "ALERT_NOTIFICATION_TYPE")
 
     if completion_type_id is None or active_status_id is None:
         print("Required system codes missing; exiting without processing")
@@ -428,11 +296,16 @@ def process_completion_alerts(lookback_minutes: int = LOOKBACK_MINUTES) -> int:
         LEFT JOIN admin.system_codes sc_sev    ON sc_sev.code_id  = ad.severity_cd
                                               AND sc_sev.code_type_cd = 'ALERT_SEVERITY'
         WHERE ad.is_enabled = true
-          AND ad.alert_type_cd = {completion_type_id}
+          AND ad.alert_type_cd ={completion_type_id}
         ORDER BY p.pipeline_name, ad.alert_name;
         """
+    #print(alerts_query)
 
-    alerts = execute_query(alerts_query, fetch=True)
+    # Load enabled completion alerts; decode human-readable fields directly in SQL
+    alerts = execute_query(
+        alerts_query,
+        fetch=True,
+    )
     if alerts is None or alerts.empty:
         print("No enabled completion alerts found")
         return 0
@@ -444,40 +317,27 @@ def process_completion_alerts(lookback_minutes: int = LOOKBACK_MINUTES) -> int:
         adid = int(a["alert_definition_id"])
         pipeline_id = int(a["pipeline_id"])
         environment_id = int(a["environment_id"])
-        recipient_list_raw = (a.get("recipient_list") or "").strip()
-
         print(f"Processing alert_definition_id={adid} pipeline_id={pipeline_id} environment_id={environment_id}")
 
-        # --- Determine channel ---
-        is_sqs_alert = False
+        is_sqs_type = False
         if sqs_type_id is not None and int(a["notification_type_cd"]) == sqs_type_id:
-            is_sqs_alert = True
+            is_sqs_type = True
 
-        is_email_alert = False
+        is_email_type = False
+        # Only email channel for now
         if email_type_id is not None and int(a["notification_type_cd"]) == email_type_id:
-            is_email_alert = True
+            is_email_type = True
+            # print(f"Skipping alert_definition_id={adid} due to non-email notification_type_cd={a['notification_type_cd']}")
+            # continue
 
-        if not is_sqs_alert and not is_email_alert:
-            print(
-                f"Skipping alert_definition_id={adid} due to unsupported notification_type_cd={a['notification_type_cd']}"
-            )
+        if not is_sqs_type and not is_email_type:
+            print(f"Skipping alert_definition_id={adid} due to non-email and non-sqs notification_type_cd={a['notification_type_cd']}")
             continue
 
-        # --- Parse recipients based on channel ---
-        recipients: List[str] = []
-        queue_urls: List[str] = []
-
-        if is_email_alert:
-            recipients = split_email_recipients(recipient_list_raw)
-            if not recipients:
-                print(f"Skipping alert_definition_id={adid} because email recipient list is empty or invalid")
-                continue
-
-        if is_sqs_alert:
-            queue_urls = split_sqs_queue_urls(recipient_list_raw)
-            if not queue_urls:
-                print(f"Skipping alert_definition_id={adid} because SQS QueueUrl(s) not found in recipient_list")
-                continue
+        recipients = split_email_recipients(a.get("recipient_list", ""))
+        if not recipients:
+            print(f"Skipping alert_definition_id={adid} because recipient list is empty or invalid")
+            continue
 
         # Find recent COMPLETED runs + total_processed_count
         print(f"Querying recent COMPLETED runs for pipeline_id={pipeline_id} environment_id={environment_id}")
@@ -535,10 +395,7 @@ def process_completion_alerts(lookback_minutes: int = LOOKBACK_MINUTES) -> int:
 
             start_dt = r["start_dt"]
             end_dt = r["end_dt"]
-
             duration_min = minutes_between(start_dt, end_dt)
-            duration_sec = _duration_seconds(start_dt, end_dt)
-
             total_processed_count_raw = r.get("total_processed_count")
             total_processed_count = _to_int_or_none(total_processed_count_raw)
             if total_processed_count is None and total_processed_count_raw is not None:
@@ -556,6 +413,18 @@ def process_completion_alerts(lookback_minutes: int = LOOKBACK_MINUTES) -> int:
                 f"severity_desc={a.get('severity_desc')}"
             )
 
+
+            duration_min = minutes_between(start_dt, end_dt)
+            duration_sec = _duration_seconds(start_dt, end_dt)
+
+            total_processed_count_raw = r.get("total_processed_count")
+            total_processed_count = _to_int_or_none(total_processed_count_raw)
+            if total_processed_count is None and total_processed_count_raw is not None:
+                print(f"Could not parse total_processed_count='{total_processed_count_raw}' for run_id={run_id}")
+            elif total_processed_count is not None:
+                print(f"Resolved total_processed_count={total_processed_count} for run_id={run_id}")
+
+
             context = {
                 "severity_text": severity_text,
                 "pipeline_name": a.get("pipeline_name"),
@@ -565,14 +434,16 @@ def process_completion_alerts(lookback_minutes: int = LOOKBACK_MINUTES) -> int:
                 "start_dt": start_dt,
                 "end_dt": end_dt,
                 "duration_minutes": duration_min,
-                "duration_seconds": duration_sec,
-                "total_processed_count": total_processed_count,
+                "duration_seconds": duration_sec,              # NEW
+                "total_processed_count": total_processed_count, # kept raw; template will comma-format
                 "alert_name": a.get("alert_name"),
                 "alert_description": a.get("alert_description"),
             }
 
+
             logo_bytes = load_shift4_logo_bytes()
             inline_images = {"shift4logo": logo_bytes} if logo_bytes else None
+
 
             # Render subject/text/html via external templates (fallback-safe)
             rendered = render_email_templates("COMPLETION_ALERT", context)
@@ -594,9 +465,6 @@ def process_completion_alerts(lookback_minutes: int = LOOKBACK_MINUTES) -> int:
                 "alert_name": a.get("alert_name"),
                 "severity_cd": int(a.get("severity_cd")),
             }
-
-            # Store intended channel in notification_channels on insert (so DB truth matches branch)
-            channels = ["sqs"] if is_sqs_alert else ["email"]
 
             ins = execute_query(
                 """
@@ -620,7 +488,7 @@ def process_completion_alerts(lookback_minutes: int = LOOKBACK_MINUTES) -> int:
                     "status_id": active_status_id,
                     "msg": alert_message,
                     "j": json.dumps(alert_data),
-                    "channels": channels,
+                    "channels": ["email"],
                 },
                 fetch=True,
             )
@@ -631,103 +499,39 @@ def process_completion_alerts(lookback_minutes: int = LOOKBACK_MINUTES) -> int:
             alert_instance_id = int(ins.iloc[0]["alert_instance_id"])
             print(f"Inserted alert_instance_id={alert_instance_id}")
 
-            # -------------------------
-            # TRANSMIT (branch)
-            # -------------------------
-            if is_sqs_alert:
-                try:
-                    # Pull run details for message payload
-                    run_details = get_pipeline_run_details(run_id)
+            # Send email
+            try:
+                print(f"Sending email to {len(recipients)} recipient(s) for alert_instance_id={alert_instance_id}")
+                mailer.send_mail(
+                    recipients=recipients,
+                    subject=subject,
+                    text_body=text_body,
+                    html_body=html_body,
+                    inline_images=inline_images,  # NEW
+                )
 
-                    print("*"*40)
-                    print(run_details)
-                    print("*"*40)
-
-                    sqs_message = {
-                        "alert_type": "COMPLETION_ALERT",
-                        "alert_instance_id": alert_instance_id,
-                        "alert_definition_id": adid,
-                        "pipeline_id": pipeline_id,
-                        "environment_id": environment_id,
-                        "pipeline_run_id": run_id,
-                        "severity": severity_text,
-                        "subject": subject,
-                        "alert_data": alert_data,
-                        "run_details": run_details,
-                        "triggered_at": str(end_dt),
-                    }
-
-                    message_ids: List[str] = []
-                    for qurl in queue_urls:
-                        resp = send_sqs_notification(queue_url=qurl, message=sqs_message)
-                        mid = (resp or {}).get("MessageId")
-                        if mid:
-                            message_ids.append(mid)
-
-                    execute_query(
-                        """
-                        UPDATE pipeline.alert_instance
-                           SET notification_sent = TRUE,
-                               notification_sent_at = CURRENT_TIMESTAMP,
-                               alert_data = COALESCE(alert_data, '{}'::jsonb)
-                                          || jsonb_build_object('sqs_message_ids', %(mids)s)
-                         WHERE alert_instance_id = %(id)s;
-                        """,
-                        {"id": alert_instance_id, "mids": json.dumps(message_ids)},
-                        fetch=False,
-                    )
-                    print(
-                        f"SQS sent and alert_instance marked sent: alert_instance_id={alert_instance_id} "
-                        f"(queues={len(queue_urls)}, message_ids={len(message_ids)})"
-                    )
-
-                except Exception as ex:
-                    print(f"Error sending SQS for alert_instance_id={alert_instance_id}: {ex}")
-                    execute_query(
-                        """
-                        UPDATE pipeline.alert_instance
-                           SET alert_data = COALESCE(alert_data, '{}'::jsonb)
-                                        || jsonb_build_object('sqs_error', %(err)s)
-                         WHERE alert_instance_id = %(id)s;
-                        """,
-                        {"id": alert_instance_id, "err": str(ex)},
-                        fetch=False,
-                    )
-
-            elif is_email_alert:
-                try:
-                    print(f"Sending email to {len(recipients)} recipient(s) for alert_instance_id={alert_instance_id}")
-                    mailer.send_mail(
-                        recipients=recipients,
-                        subject=subject,
-                        text_body=text_body,
-                        html_body=html_body,
-                        inline_images=inline_images,
-                    )
-
-                    execute_query(
-                        """
-                        UPDATE pipeline.alert_instance
-                           SET notification_sent = TRUE,
-                               notification_sent_at = CURRENT_TIMESTAMP
-                         WHERE alert_instance_id = %(id)s;
-                        """,
-                        {"id": alert_instance_id},
-                        fetch=False,
-                    )
-                    print(f"Email sent and alert_instance marked sent: alert_instance_id={alert_instance_id}")
-                except Exception as ex:
-                    print(f"Error sending email for alert_instance_id={alert_instance_id}: {ex}")
-                    execute_query(
-                        """
-                        UPDATE pipeline.alert_instance
-                           SET alert_data = COALESCE(alert_data, '{}'::jsonb)
-                                        || jsonb_build_object('email_error', %(err)s)
-                         WHERE alert_instance_id = %(id)s;
-                        """,
-                        {"id": alert_instance_id, "err": str(ex)},
-                        fetch=False,
-                    )
+                execute_query(
+                    """
+                    UPDATE pipeline.alert_instance
+                       SET notification_sent = TRUE,
+                           notification_sent_at = CURRENT_TIMESTAMP
+                     WHERE alert_instance_id = %(id)s;
+                    """,
+                    {"id": alert_instance_id},
+                    fetch=False,
+                )
+                print(f"Email sent and alert_instance marked sent: alert_instance_id={alert_instance_id}")
+            except Exception as ex:
+                print(f"Error sending email for alert_instance_id={alert_instance_id}: {ex}")
+                execute_query(
+                    """
+                    UPDATE pipeline.alert_instance
+                       SET alert_data = COALESCE(alert_data, '{}'::jsonb) || jsonb_build_object('email_error', %(err)s)
+                     WHERE alert_instance_id = %(id)s;
+                    """,
+                    {"id": alert_instance_id, "err": str(ex)},
+                    fetch=False,
+                )
 
             created += 1
 
