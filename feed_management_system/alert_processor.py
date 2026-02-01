@@ -32,7 +32,7 @@ import re
 import json
 
 
-def transform_alert_to_notification(alert_data):
+def transform_alert_to_notification(alert_data,schema_version = "1"):
     """
     Transform alert JSON to notification JSON format.
     Only includes keys that exist in both source and target.
@@ -51,21 +51,35 @@ def transform_alert_to_notification(alert_data):
     # Map the fields
     if 'JOB_TYPE' in detail_map:
         output['job_type'] = detail_map['JOB_TYPE']
+    else:
+        output['job_type'] = ""
     
     if 'JOB_FILE_NUMBER' in detail_map:
         output['job_file_number'] = detail_map['JOB_FILE_NUMBER']
+    else:
+        output['job_file_number'] = ""
     
     if 'BANK_FILE_NUMBER' in detail_map:
         output['bank_file_number'] = detail_map['BANK_FILE_NUMBER']
+    else:
+        output['bank_file_number'] = ""
     
     if 'SOURCE' in detail_map:
         output['source'] = detail_map['SOURCE']
+    else:
+        output['source'] = ""
     
     if 'ENV' in detail_map:
         output['env'] = detail_map['ENV']
+    else:
+        output['env'] = ""
     
     if 'REQUESTED_AT' in detail_map:
         output['requested_at'] = detail_map['REQUESTED_AT']
+    else:
+        output['requested_at'] = ""
+
+    output['schema_version'] = schema_version
     
     return output
 
@@ -677,9 +691,6 @@ def process_completion_alerts(lookback_minutes: int = LOOKBACK_MINUTES) -> int:
                     # Pull run details for message payload
                     run_details = get_pipeline_run_details(run_id)
 
-                    print("*"*40)
-                    print(run_details)
-                    print("*"*40)
 
                     sqs_message = {
                         "alert_type": "COMPLETION_ALERT",
@@ -697,7 +708,12 @@ def process_completion_alerts(lookback_minutes: int = LOOKBACK_MINUTES) -> int:
 
                     message_ids: List[str] = []
                     for qurl in queue_urls:
+                        print("*"*40)
+                        print(f"Sending SQS Message to: {qurl}.")
+                        print("*"*40)
                         transformed_message = transform_alert_to_notification(sqs_message)
+                        print(transformed_message)
+                        print("*"*40)                        
                         resp = send_sqs_notification(queue_url=qurl, message=transformed_message)
                         mid = (resp or {}).get("MessageId")
                         if mid:

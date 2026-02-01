@@ -141,41 +141,44 @@ def _codes_id_to_common(df: pd.DataFrame) -> Dict[int, str]:
 def upsert_alert_definition(payload: Dict[str, Any]) -> Optional[int]:
     """
     Insert or update alert_definition, then return alert_definition_id.
+    Uses alert_definition_id if provided for updates, otherwise creates new.
     """
-    insert_sql = """
-        INSERT INTO pipeline.alert_definition
-            (pipeline_id, environment_id, alert_type_cd, alert_name, alert_description,
-             severity_cd, notification_type_cd, recipient_list, is_enabled, created_by, updated_by)
-        VALUES (%(pipeline_id)s, %(environment_id)s, %(alert_type_cd)s, %(alert_name)s, %(alert_description)s,
-                %(severity_cd)s, %(notification_type_cd)s, %(recipient_list)s, %(is_enabled)s, %(user)s, %(user)s)
-        ON CONFLICT (pipeline_id, environment_id, alert_type_cd, alert_name)
-        DO UPDATE SET
-            alert_description = EXCLUDED.alert_description,
-            severity_cd = EXCLUDED.severity_cd,
-            notification_type_cd = EXCLUDED.notification_type_cd,
-            recipient_list = EXCLUDED.recipient_list,
-            is_enabled = EXCLUDED.is_enabled,
-            updated_at = CURRENT_TIMESTAMP,
-            updated_by = EXCLUDED.updated_by;
-    """
-    execute_query(insert_sql, payload, fetch=False)
-
-    select_sql = """
-        SELECT alert_definition_id
-        FROM pipeline.alert_definition
-        WHERE pipeline_id = %(pipeline_id)s
-          AND environment_id = %(environment_id)s
-          AND alert_type_cd = %(alert_type_cd)s
-          AND alert_name = %(alert_name)s
-        LIMIT 1;
-    """
-    df = execute_query(select_sql, payload)
-    if df is not None and not df.empty:
-        try:
-            return int(df.iloc[0, 0])
-        except Exception:
-            return None
-    return None
+    alert_def_id = payload.get("alert_definition_id")
+    
+    if alert_def_id:
+        # Update existing alert
+        update_sql = """
+            UPDATE pipeline.alert_definition
+            SET alert_name = %(alert_name)s,
+                alert_description = %(alert_description)s,
+                alert_type_cd = %(alert_type_cd)s,
+                severity_cd = %(severity_cd)s,
+                notification_type_cd = %(notification_type_cd)s,
+                recipient_list = %(recipient_list)s,
+                is_enabled = %(is_enabled)s,
+                updated_at = CURRENT_TIMESTAMP,
+                updated_by = %(user)s
+            WHERE alert_definition_id = %(alert_definition_id)s;
+        """
+        execute_query(update_sql, payload, fetch=False)
+        return alert_def_id
+    else:
+        # Insert new alert
+        insert_sql = """
+            INSERT INTO pipeline.alert_definition
+                (pipeline_id, environment_id, alert_type_cd, alert_name, alert_description,
+                 severity_cd, notification_type_cd, recipient_list, is_enabled, created_by, updated_by)
+            VALUES (%(pipeline_id)s, %(environment_id)s, %(alert_type_cd)s, %(alert_name)s, %(alert_description)s,
+                    %(severity_cd)s, %(notification_type_cd)s, %(recipient_list)s, %(is_enabled)s, %(user)s, %(user)s)
+            RETURNING alert_definition_id;
+        """
+        df = execute_query(insert_sql, payload)
+        if df is not None and not df.empty:
+            try:
+                return int(df.iloc[0, 0])
+            except Exception:
+                return None
+        return None
 
 
 def delete_alert_cascade(alert_definition_id: int) -> None:
@@ -294,11 +297,10 @@ def clear_alert_form_state() -> None:
         "af_notif_label",
         "af_is_enabled",
         "af_recipient_list",
-        "af_seed_alert_id",
         "current_adid",
         "current_alert_type_cd",
-        "last_selected_alert_id",
-        "alert_selector",
+        "selected_alert_id",
+        "alert_selector",  # IMPORTANT: Clear the dropdown widget key too
     ]
     for key in keys_to_clear:
         st.session_state.pop(key, None)
@@ -325,41 +327,26 @@ def check_context_change(pipeline_id: int, environment_id: int) -> bool:
     return False
 
 
-def _seed_alert_form_state(
-    selected_alert_id: Optional[int],
-    existing: Optional[pd.DataFrame],
+def seed_form_from_alert(
+    alert_id: int,
+    existing: pd.DataFrame,
     alert_type_id2label: Dict[int, str],
     severity_id2label: Dict[int, str],
     notif_id2label: Dict[int, str],
 ) -> None:
-    """
-    Seed Streamlit widget state for the create/edit form from the selected alert.
-    """
-    seed_key = "af_seed_alert_id"
-    last = st.session_state.get(seed_key)
-
-    # Create New: clear seeded values once
-    if not selected_alert_id:
-        if last is not None:
-            st.session_state[seed_key] = None
-            clear_alert_form_state()
-        else:
-            if "af_is_enabled" not in st.session_state:
-                st.session_state["af_is_enabled"] = True
-        return
-
-    # Only reseed when selection changes
-    if last == selected_alert_id:
-        return
-    st.session_state[seed_key] = selected_alert_id
-
+    """Seed form state from selected alert."""
     if existing is None or existing.empty:
         return
 
-    m = existing[existing["alert_definition_id"] == selected_alert_id]
+    m = existing[existing["alert_definition_id"] == alert_id]
     if m.empty:
         return
+    
     row = m.iloc[0]
+
+    # Set the current alert ID
+    st.session_state["selected_alert_id"] = alert_id
+    st.session_state["current_adid"] = alert_id
 
     # Seed text fields
     st.session_state["af_alert_name"] = str(row.get("alert_name") or "")
@@ -372,8 +359,6 @@ def _seed_alert_form_state(
         lbl = alert_type_id2label.get(int(row["alert_type_cd"]))
         if lbl:
             st.session_state["af_alert_type_label"] = lbl
-        else:
-            st.session_state.pop("af_alert_type_label", None)
     except Exception:
         st.session_state.pop("af_alert_type_label", None)
 
@@ -381,8 +366,6 @@ def _seed_alert_form_state(
         lbl = severity_id2label.get(int(row["severity_cd"]))
         if lbl:
             st.session_state["af_severity_label"] = lbl
-        else:
-            st.session_state.pop("af_severity_label", None)
     except Exception:
         st.session_state.pop("af_severity_label", None)
 
@@ -390,10 +373,26 @@ def _seed_alert_form_state(
         lbl = notif_id2label.get(int(row["notification_type_cd"]))
         if lbl:
             st.session_state["af_notif_label"] = lbl
-        else:
-            st.session_state.pop("af_notif_label", None)
     except Exception:
         st.session_state.pop("af_notif_label", None)
+
+    # Store alert type code
+    try:
+        st.session_state["current_alert_type_cd"] = int(row["alert_type_cd"])
+    except Exception:
+        pass
+
+
+def initialize_create_new_state() -> None:
+    """Initialize state for creating a new alert."""
+    # Clear everything first
+    clear_alert_form_state()
+    
+    # Set only the enabled flag to default True
+    st.session_state["af_is_enabled"] = True
+    
+    # Mark that we're in create mode (no selected alert)
+    st.session_state["selected_alert_id"] = None
 
 
 # -----------------------------
@@ -436,25 +435,26 @@ def render_existing_alerts_section(
                 for _, r in existing.iterrows()
             }
             
-            # Track last selected alert to detect changes
-            last_selected = st.session_state.get("last_selected_alert_id")
+            # Get current selection from session state
+            current_selected = st.session_state.get("selected_alert_id")
+            
+            # Determine default index
+            default_index = 0
+            if current_selected:
+                for i, (label, aid) in enumerate(select_map.items(), start=1):
+                    if aid == current_selected:
+                        default_index = i
+                        break
             
             select_label = st.selectbox(
                 "Select an alert to edit (optional)",
                 options=["(Create New)"] + list(select_map.keys()),
-                index=0,
+                index=default_index,
                 key="alert_selector"
             )
             
             if select_label != "(Create New)":
                 selected_alert_id = select_map[select_label]
-                row = existing[existing["alert_definition_id"] == selected_alert_id].iloc[0]
-                st.session_state["current_alert_type_cd"] = int(row["alert_type_cd"])
-                
-                # Force rerun if selection changed
-                if last_selected != selected_alert_id:
-                    st.session_state["last_selected_alert_id"] = selected_alert_id
-                    st.rerun()
 
                 # Delete section
                 st.divider()
@@ -470,11 +470,6 @@ def render_existing_alerts_section(
                         clear_alert_form_state()
                         st.cache_data.clear()
                         st.rerun()
-            else:
-                # Clear tracking when "(Create New)" is selected
-                if last_selected is not None:
-                    st.session_state["last_selected_alert_id"] = None
-                    st.rerun()
         else:
             st.caption("No alerts yet for this pipeline & environment.")
 
@@ -523,7 +518,7 @@ def render_alert_definition_form(
             is_enabled = st.toggle("Enabled", key="af_is_enabled")
 
         recipient_list = st.text_input(
-            "Recipients (comma-separated emails or Slack channels)",
+            "Recipients (comma-separated emails, SQS ARNS, or Slack channels)",
             key="af_recipient_list",
         )
 
@@ -534,6 +529,9 @@ def render_alert_definition_form(
             if not alert_name.strip():
                 st.error("Alert name is required.")
             else:
+                # Get the current alert_definition_id if editing
+                current_adid = st.session_state.get("current_adid")
+                
                 payload = {
                     "pipeline_id": pipeline_id,
                     "environment_id": environment_id,
@@ -546,10 +544,16 @@ def render_alert_definition_form(
                     "is_enabled": is_enabled,
                     "user": st.session_state.get("user", {}).get("email", "system"),
                 }
+                
+                # Include alert_definition_id if editing existing alert
+                if current_adid:
+                    payload["alert_definition_id"] = current_adid
+                
                 adid = upsert_alert_definition(payload)
                 if adid:
                     st.success("Alert saved. Configure details below (if required).")
                     st.session_state["current_adid"] = adid
+                    st.session_state["selected_alert_id"] = adid
                     st.session_state["current_alert_type_cd"] = payload["alert_type_cd"]
                     st.cache_data.clear()
                     st.rerun()
@@ -800,7 +804,7 @@ def alert_management_page():
     env_label = st.selectbox("Environment", options=list(env_label_to_id.keys()))
     environment_id = env_label_to_id[env_label]
 
-    # Check if pipeline/environment context changed
+    # Check if pipeline/environment context changed - if so, stop rendering and rerun
     if check_context_change(pipeline_id, environment_id):
         st.rerun()
 
@@ -817,14 +821,24 @@ def alert_management_page():
         notif_id2label,
     )
 
-    # Seed form state
-    _seed_alert_form_state(
-        selected_alert_id=selected_alert_id,
-        existing=existing,
-        alert_type_id2label=alert_type_id2label,
-        severity_id2label=severity_id2label,
-        notif_id2label=notif_id2label,
-    )
+    # Handle alert selection changes
+    current_selected = st.session_state.get("selected_alert_id")
+    
+    if selected_alert_id != current_selected:
+        if selected_alert_id:
+            # User selected an existing alert - seed the form
+            seed_form_from_alert(
+                selected_alert_id,
+                existing,
+                alert_type_id2label,
+                severity_id2label,
+                notif_id2label,
+            )
+            st.rerun()
+        else:
+            # User selected "Create New" - clear the form completely
+            initialize_create_new_state()
+            st.rerun()
 
     st.markdown("---")
 
@@ -832,7 +846,7 @@ def alert_management_page():
     render_alert_definition_form(pipeline_id, environment_id, code_maps)
 
     # Determine current alert for configuration
-    adid = st.session_state.get("current_adid", selected_alert_id)
+    adid = st.session_state.get("current_adid")
     
     if not adid:
         st.info("Save an alert first to configure any additional details.")
