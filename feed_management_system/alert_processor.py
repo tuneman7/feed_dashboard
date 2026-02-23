@@ -453,6 +453,7 @@ def process_completion_alerts(lookback_minutes: int = LOOKBACK_MINUTES) -> int:
     email_type_id        = get_code_id("EMAIL", "ALERT_NOTIFICATION_TYPE")
     total_count_type_id  = get_code_id("TOTAL_PROCESSED_COUNT", "PIPELINE_RUN_DETAIL_TYPE")
     sqs_type_id          = get_code_id("SQS", "ALERT_NOTIFICATION_TYPE")
+    pager_duty_type_id   = get_code_id("PAGER_DUTY", "ALERT_NOTIFICATION_TYPE")
 
     if completion_type_id is None or active_status_id is None:
         print("Required system codes missing; exiting without processing")
@@ -509,7 +510,11 @@ def process_completion_alerts(lookback_minutes: int = LOOKBACK_MINUTES) -> int:
         if email_type_id is not None and int(a["notification_type_cd"]) == email_type_id:
             is_email_alert = True
 
-        if not is_sqs_alert and not is_email_alert:
+        is_pager_duty_alert = False
+        if pager_duty_type_id is not None and int(a["notification_type_cd"]) == pager_duty_type_id:
+            is_pager_duty_alert = True            
+
+        if not is_sqs_alert and not is_email_alert and not is_pager_duty_alert:
             print(
                 f"Skipping alert_definition_id={adid} due to unsupported notification_type_cd={a['notification_type_cd']}"
             )
