@@ -1,34 +1,42 @@
 #!/bin/bash
 
 # Deploy and Connect Script
-# This script copies the current directory to the Ubuntu box and connects
+# Copies current directory to the Ubuntu box for the given environment
+
+ENV="${1:-dev}"
+KEY_FILE="id_rsa_${ENV}"
 
 echo "==============================="
 echo "Deploy and Connect to Ubuntu EC2"
+echo "Environment: $ENV"
 echo "==============================="
 echo
+
+# Select the correct Terraform workspace so output reads from the right state
+terraform workspace select "$ENV" 2>/dev/null || true
 
 # Get the public IP from terraform output
 PUBLIC_IP=$(terraform output -raw public_ip 2>/dev/null)
 
 # Check if we got a valid IP
 if [ -z "$PUBLIC_IP" ] || [ "$PUBLIC_IP" = "null" ]; then
-    echo "❌ Could not retrieve public IP from Terraform output"
-    echo "   Make sure you've run 'terraform apply' successfully"
+    echo "❌ Could not retrieve public IP from Terraform output ($ENV)"
+    echo "   Make sure you've run '. terraform-build.sh $ENV' successfully"
     return 1 2>/dev/null || true
 fi
 
 # Check if private key exists
-if [ ! -f "id_rsa" ]; then
-    echo "❌ Private key file 'id_rsa' not found"
-    echo "   Make sure you've run 'terraform apply' successfully"
+if [ ! -f "$KEY_FILE" ]; then
+    echo "❌ Private key file '$KEY_FILE' not found"
+    echo "   Make sure you've run '. terraform-build.sh $ENV' successfully"
     return 1 2>/dev/null || true
 fi
 
 # Fix private key permissions
-chmod 400 id_rsa
+chmod 400 "$KEY_FILE"
 
 echo "🔗 Target: ubuntu@$PUBLIC_IP"
+echo "🔑 Key   : $KEY_FILE"
 echo "📁 Deploying current directory to ~/app/"
 echo
 
@@ -47,9 +55,11 @@ id_rsa*
 *.pem
 
 # Scripts
-connect.sh
+connect*.sh
 deploy.sh
 destroy.sh
+destroy_and_build.sh
+terraform-build.sh
 
 # Version control
 .git/
@@ -87,8 +97,6 @@ should_exclude() {
     while IFS= read -r pattern || [ -n "$pattern" ]; do
         # Skip empty lines and comments
         [[ -z "$pattern" || "$pattern" =~ ^[[:space:]]*# ]] && continue
-        
-        # Simple pattern matching (you could enhance this with more complex glob patterns)
         if [[ "$path" == $pattern* ]] || [[ "$path" == *"$pattern"* ]]; then
             return 0  # Should exclude
         fi
@@ -102,11 +110,8 @@ echo "📦 Preparing files for deployment..."
 
 # Copy files while respecting .deployignore
 find . -type f -not -path "./.git/*" | while read -r file; do
-    # Remove leading ./
     clean_path="${file#./}"
-    
     if ! should_exclude "$clean_path"; then
-        # Create directory structure in temp dir
         mkdir -p "$TEMP_DIR/$(dirname "$clean_path")"
         cp "$file" "$TEMP_DIR/$clean_path"
     fi
@@ -115,7 +120,7 @@ done
 echo "🚀 Copying files to remote server..."
 
 # Test SSH connectivity first
-if ! ssh -i id_rsa -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$PUBLIC_IP 'echo "Connection test successful"' >/dev/null 2>&1; then
+if ! ssh -i "$KEY_FILE" -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$PUBLIC_IP 'echo "Connection test successful"' > /dev/null 2>&1; then
     echo "❌ Cannot connect to server. Instance might still be starting up."
     echo "   Wait a minute and try again."
     rm -rf "$TEMP_DIR"
@@ -124,67 +129,59 @@ fi
 
 # Kill any existing Streamlit processes before deployment
 echo "🔄 Stopping any running Streamlit applications..."
-ssh -i id_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$PUBLIC_IP '
-    # Kill streamlit processes
+ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$PUBLIC_IP '
     pkill -f streamlit 2>/dev/null || true
     pkill -f "python.*streamlit" 2>/dev/null || true
-    
-    # Wait a moment for processes to terminate
     sleep 2
-    
-    # Check if any streamlit processes are still running
-    if pgrep -f streamlit >/dev/null 2>&1; then
+    if pgrep -f streamlit > /dev/null 2>&1; then
         echo "   Force killing remaining streamlit processes..."
         pkill -9 -f streamlit 2>/dev/null || true
         sleep 1
     fi
-    
     echo "   Streamlit processes stopped"
 ' || echo "   Note: No streamlit processes were running"
 
 # Clear the app directory and copy new files
-ssh -i id_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$PUBLIC_IP 'rm -rf ~/app && mkdir -p ~/app'
+ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$PUBLIC_IP 'rm -rf ~/app && mkdir -p ~/app'
 
-# Copy files using scp (show progress)
+# Copy files using scp
 echo "📤 Copying files..."
-if scp -i id_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -r "$TEMP_DIR"/* ubuntu@$PUBLIC_IP:~/app/; then
+if scp -i "$KEY_FILE" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -r "$TEMP_DIR"/* ubuntu@$PUBLIC_IP:~/app/; then
     echo "✅ SCP completed!"
-    
-    # Verify the copy is complete by checking for expected files/directories
+
     echo "🔍 Verifying deployment..."
-    sleep 2  # Give filesystem a moment to sync
-    
+    sleep 2
+
     # Wait for the specific sr.sh file to be present
     echo "⏳ Waiting for sr.sh to be ready..."
     RETRY_COUNT=0
     MAX_RETRIES=30
-    
+
     while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-        if ssh -i id_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$PUBLIC_IP 'test -f ~/app/feed_management_system/sr.sh' 2>/dev/null; then
+        if ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$PUBLIC_IP 'test -f ~/app/feed_management_system/sr.sh' 2>/dev/null; then
             echo "✅ sr.sh found! Deployment verified."
             break
         fi
-        
         RETRY_COUNT=$((RETRY_COUNT + 1))
         echo "   Attempt $RETRY_COUNT/$MAX_RETRIES - waiting for sr.sh..."
         sleep 1
     done
-    
+
     if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
         echo "❌ Timeout waiting for sr.sh to appear"
         echo "   Files may not have copied correctly"
         rm -rf "$TEMP_DIR"
         return 1 2>/dev/null || true
     fi
-    
+
     # Fix line endings for all shell scripts
     echo "🔧 Fixing line endings for shell scripts..."
-    ssh -i id_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$PUBLIC_IP 'find ~/app -name "*.sh" -type f -exec dos2unix {} \; 2>/dev/null && echo "Line endings fixed for shell scripts"' || echo "Note: dos2unix not available or no .sh files found"
-    
+    ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$PUBLIC_IP 'find ~/app -name "*.sh" -type f -exec dos2unix {} \; 2>/dev/null && echo "Line endings fixed for shell scripts"' || echo "Note: dos2unix not available or no .sh files found"
+
     # Make all shell scripts executable
     echo "🔧 Making shell scripts executable..."
-    ssh -i id_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$PUBLIC_IP 'find ~/app -name "*.sh" -type f -exec chmod +x {} \; && echo "Shell scripts made executable"' || true
-    
+    ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$PUBLIC_IP 'find ~/app -name "*.sh" -type f -exec chmod +x {} \; && echo "Shell scripts made executable"' || true
+
 else
     echo "❌ File deployment failed"
     rm -rf "$TEMP_DIR"
@@ -195,9 +192,7 @@ fi
 rm -rf "$TEMP_DIR"
 
 echo "📊 Deployment summary:"
-ssh -i id_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$PUBLIC_IP 'echo "Files in ~/app:"; ls -la ~/app/ 2>/dev/null | wc -l | xargs echo "Total files/dirs:" || echo "Directory empty or not accessible"'
-
-
+ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$PUBLIC_IP 'echo "Files in ~/app:"; ls -la ~/app/ 2>/dev/null | wc -l | xargs echo "Total files/dirs:" || echo "Directory empty or not accessible"'
 
 echo
 echo "🔌 Connecting to server and changing to app directory..."
@@ -205,9 +200,8 @@ echo "   You are now in the ~/app directory on the remote server"
 echo "   Type 'exit' to return to your local machine"
 echo
 
-# Check if feed_management_system directory exists, if not use app directory
 # Connect and change to appropriate directory
-ssh -i id_rsa \
+ssh -i "$KEY_FILE" \
     -o StrictHostKeyChecking=no \
     -o UserKnownHostsFile=/dev/null \
     -o ServerAliveInterval=60 \
@@ -219,16 +213,35 @@ if [ $? -ne 0 ]; then
     echo
     echo "❌ SSH connection failed after deployment"
     echo "   Files were deployed successfully, but connection failed"
-    echo "   Try running ./connect.sh manually"
+    echo "   Try running ./connect_${ENV}.sh manually"
 fi
 
 ###############################################################################
-# Install/Update cron to run the alert processor every 3 minutes
+# Install/Update cron to run the alert processor every 2 minutes (prod only)
 ###############################################################################
 echo
-echo "⏲️  Installing/Updating cron job for alert processor..."
 
-ssh -i id_rsa -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$PUBLIC_IP <<'REMOTE'
+if [ "$ENV" != "prod" ]; then
+    echo "⏭️  Skipping alert processor cron install (dev environment)."
+    echo "   The following commands would run on prod:"
+    echo
+    echo '   ssh ubuntu@$PUBLIC_IP <<"REMOTE"'
+    echo '     APP_DIR="$HOME/app/feed_management_system"'
+    echo '     RUN_SCRIPT="$APP_DIR/run_processor.sh"'
+    echo '     LOG_DIR="$APP_DIR/logs"'
+    echo '     CRON_MARK="# ALERT_PROCESSOR_CRON"'
+    echo '     mkdir -p "$LOG_DIR" && chmod 777 "$LOG_DIR"'
+    echo '     chmod +x "$RUN_SCRIPT" || true'
+    echo '     CRON_LINE="*/2 * * * * cd $APP_DIR && /bin/bash $RUN_SCRIPT >> $LOG_DIR/alert_processor.log 2>&1 $CRON_MARK"'
+    echo '     { crontab -l 2>/dev/null || true; } | grep -vF "$CRON_MARK" | crontab - || true'
+    echo '     ( crontab -l 2>/dev/null || true; echo "$CRON_LINE" ) | crontab -'
+    echo '   REMOTE'
+    echo
+    echo "   ▶  To run the processor on dev manually: . deploy.sh prod"
+else
+    echo "⏲️  Installing/Updating cron job for alert processor..."
+
+    ssh -i "$KEY_FILE" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@$PUBLIC_IP <<'REMOTE'
 set -euo pipefail
 
 APP_DIR="$HOME/app/feed_management_system"
@@ -236,17 +249,12 @@ RUN_SCRIPT="$APP_DIR/run_processor.sh"
 LOG_DIR="$APP_DIR/logs"
 CRON_MARK="# ALERT_PROCESSOR_CRON"
 
-# Ensure logs directory exists and is writable by the ubuntu user
 mkdir -p "$LOG_DIR"
 chmod 777 "$LOG_DIR"
-
-# Ensure the processor script is executable
 chmod +x "$RUN_SCRIPT" || true
 
-# Run every 2 minutes
 CRON_LINE="*/2 * * * * cd $APP_DIR && /bin/bash $RUN_SCRIPT >> $LOG_DIR/alert_processor.log 2>&1 $CRON_MARK"
 
-# Safely update crontab (tolerates missing crontab)
 { crontab -l 2>/dev/null || true; } | grep -vF "$CRON_MARK" | crontab - || true
 ( crontab -l 2>/dev/null || true; echo "$CRON_LINE" ) | crontab -
 
@@ -254,4 +262,4 @@ echo "✅ Cron installed/updated."
 echo "Current crontab tail:"
 crontab -l | tail -n 5 || true
 REMOTE
-
+fi

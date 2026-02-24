@@ -2,6 +2,18 @@
 
 # Ultra-defensive DNS flush - never fails, never prompts
 
+ENV="${1:-dev}"
+
+# Resolve URL based on environment
+if [ "$ENV" = "prod" ]; then
+  URL="https://dmtdashboard.link/"
+else
+  URL="https://dmdashboard.link/"
+fi
+
+echo "🌍 Environment: $ENV"
+echo "🔗 URL: $URL"
+
 flush_dns_safe() {
     # Windows (Git Bash)
     if command -v ipconfig.exe &> /dev/null; then
@@ -9,7 +21,7 @@ flush_dns_safe() {
         echo "DNS flush attempted (Windows)"
         return 0
     fi
-    
+
     # macOS (only if we have sudo access already)
     if [[ "$OSTYPE" == "darwin"* ]] && command -v dscacheutil &> /dev/null; then
         if sudo -n true 2>/dev/null; then
@@ -21,7 +33,7 @@ flush_dns_safe() {
         fi
         return 0
     fi
-    
+
     # Linux (only if we have sudo access already)
     if command -v resolvectl &> /dev/null; then
         if sudo -n true 2>/dev/null; then
@@ -32,21 +44,15 @@ flush_dns_safe() {
         fi
         return 0
     fi
-    
+
     echo "DNS flush not available or not needed"
     return 0
 }
 
 flush_dns_safe
 
-ipconfig.exe //flushdns
-
-
-# Set your URL here
-URL="https://dmtdashboard.link/"
-
-# Alternative: Get URL from command line argument
-# URL="$1"
+# Also try the Windows command directly (harmless if not on Windows)
+ipconfig.exe //flushdns 2>/dev/null || true
 
 # Configuration
 RETRY_DELAY=5  # seconds between retries
@@ -60,23 +66,18 @@ sleep 10
 attempt=1
 
 while true; do
-    # Perform curl with suppressed output
-    # -s = silent mode (no progress bar)
-    # -S = show errors even in silent mode
-    # -o /dev/null = discard output
     if curl -s -S -o /dev/null "$URL"; then
-        echo "okay"
+        echo "✅ Site is up!"
         curl "$URL"
         break
     else
         echo "Attempt $attempt failed, retrying in $RETRY_DELAY seconds..."
-        
-        # Check if we've hit max retries (if set)
+
         if [ $MAX_RETRIES -gt 0 ] && [ $attempt -ge $MAX_RETRIES ]; then
             echo "Max retries ($MAX_RETRIES) reached. Giving up."
             return 1
         fi
-        
+
         sleep $RETRY_DELAY
         ((attempt++))
     fi

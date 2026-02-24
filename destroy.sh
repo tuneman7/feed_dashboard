@@ -2,15 +2,28 @@
 
 set +e
 
-# Terraform Destroy Script
-# This script safely destroys the Terraform infrastructure
+ENV="${1:-dev}"
 
-. cleanup-rds-security.sh 
+# Derive RDS identifier
+RDS_BASE="dst-dashboard-database-fast"
+if [ "$ENV" = "prod" ]; then
+RDS_ID="$RDS_BASE"
+else
+  #RDS_ID="${RDS_BASE}-dev"
+  RDS_ID="$RDS_BASE"
+fi
+
+KEY_FILE="id_rsa_${ENV}"
 
 echo "========================================="
 echo "Terraform Infrastructure Destroy Script"
+echo "Environment : $ENV"
+echo "RDS Instance: $RDS_ID"
 echo "========================================="
 echo
+
+# Run surgical cleanup first (removes RDS security group rules for this env's EC2)
+[ -f "cleanup-rds-security_${ENV}.sh" ] && bash "cleanup-rds-security_${ENV}.sh" "$ENV" || echo "ℹ️  No cleanup-rds-security_${ENV}.sh found — skipping (expected on first run)."
 
 # Check if terraform is installed
 if ! command -v terraform &> /dev/null; then
@@ -20,11 +33,20 @@ if ! command -v terraform &> /dev/null; then
 fi
 
 # Check if we're in a terraform directory
-if [ ! -f "main.tf" ] && [ ! -f "*.tf" ]; then
+if [ ! -f "main.tf" ]; then
     echo "❌ Error: No Terraform configuration files found in current directory"
     echo "Please run this script from your Terraform project directory"
     return 1 2>/dev/null || true
 fi
+
+# Select the correct workspace
+echo "🗂️  Selecting Terraform workspace: $ENV"
+terraform workspace select "$ENV" 2>/dev/null || {
+    echo "⚠️  Workspace '$ENV' not found. Nothing to destroy."
+    return 0 2>/dev/null || true
+}
+echo "   Active workspace: $(terraform workspace show)"
+echo
 
 # Check if terraform has been initialized
 if [ ! -d ".terraform" ]; then
@@ -37,31 +59,26 @@ echo
 terraform show
 
 echo
-echo "⚠️  WARNING: This will DESTROY all infrastructure managed by this Terraform configuration!"
+echo "⚠️  WARNING: This will DESTROY all $ENV infrastructure!"
 echo "   - EC2 instance will be terminated"
-echo "   - Security group will be deleted"
+echo "   - Security groups will be deleted"
 echo "   - SSH key pair will be removed from AWS"
-echo "   - Local private key file will remain (you can delete manually if needed)"
+echo "   - RDS security rules will have been cleaned up already"
 echo
 
-echo
-echo "🚀 Starting terraform destroy..."
+echo "🚀 Starting terraform destroy ($ENV)..."
 echo
 
-# Run terraform destroy with auto-approve
-if terraform destroy -auto-approve; then
+# Run terraform destroy with auto-approve, passing env vars
+if terraform destroy -auto-approve \
+     -var="env=$ENV" \
+     -var="rds_instance_identifier=$RDS_BASE"; then
     echo
-    echo "✅ Infrastructure successfully destroyed!"
+    echo "✅ $ENV infrastructure successfully destroyed!"
     echo
     echo "📋 Post-destroy cleanup:"
     echo "   - AWS resources have been removed"
     echo "   - Terraform state has been updated"
-    echo "   - Private key file 'id_rsa' still exists locally"
-    echo
-    echo "💡 Optional manual cleanup:"
-    echo "   - Delete the private key: rm -f id_rsa"
-    echo "   - Remove Terraform state: rm -f terraform.tfstate*"
-    echo "   - Remove Terraform cache: rm -rf .terraform"
     echo
 else
     echo
@@ -70,27 +87,21 @@ else
     echo "You may need to:"
     echo "   - Check your AWS credentials"
     echo "   - Verify resource dependencies"
-    echo "   - Run 'terraform plan -destroy' to see what would be destroyed"
+    echo "   - Run 'terraform plan -destroy -var=env=$ENV' to see what would be destroyed"
     return 1 2>/dev/null || true
 fi
 
-# Optional: Ask if user wants to clean up local files
-echo
-#read -p "Do you want to clean up local Terraform files? (yes/no): " cleanup
+# Clean up env-specific local files
+echo "🧹 Cleaning up local files for $ENV..."
+rm -f "$KEY_FILE"
+rm -f "connect_${ENV}.sh"
 
-cleanup="yes"
+# Clean Terraform state only if switching back to default workspace
+terraform workspace select default 2>/dev/null || true
+terraform workspace delete "$ENV" 2>/dev/null || echo "   (workspace kept for re-use)"
 
-if [[ $cleanup == "yes" ]]; then
-    echo "🧹 Cleaning up local files..."
-    rm -f id_rsa
-    rm -f terraform.tfstate*
-    rm -rf .terraform
-    rm -f .terraform.lock.hcl
-    echo "✅ Local cleanup complete!"
-else
-    echo "ℹ️  Local files preserved. You can clean them up manually later if needed."
-fi
+echo "✅ Local cleanup complete!"
 
 echo
-echo "🎉 Destroy process complete!"
+echo "🎉 Destroy process complete for: $ENV"
 echo "========================================="
